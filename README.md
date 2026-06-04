@@ -1,36 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Slate ✨
+
+A beautiful, AI-powered Markdown note-taking app with live preview. Built with Next.js, Tailwind CSS, and DeepSeek AI.
+
+![Slate](public/slate-logo.svg)
+
+## Features
+
+- **Split-Screen Editing** — Write raw Markdown on the left, see a styled preview on the right
+- **AI-Powered Writing Assistant** — Improve writing, fix grammar, or summarize text via DeepSeek
+- **Dark & Light Mode** — System-aware theming with smooth transitions
+- **Export to PDF** — Download your notes as a styled PDF with `⌘P` / `Ctrl+P`
+- **Resizable Panes** — Drag to resize the editor and preview panels
+- **Floating AI Toolbar** — Sleek action bar for one-click AI transformations
+
+## Tech Stack
+
+| Tech | Purpose |
+|------|---------|
+| [Next.js 16](https://nextjs.org) (App Router) | Framework |
+| [Tailwind CSS 4](https://tailwindcss.com) | Styling |
+| [next-themes](https://github.com/pacocoursey/next-themes) | Dark/Light mode |
+| [marked](https://marked.js.org) | Markdown parsing (GFM) |
+| [html2pdf.js](https://github.com/eKoopmans/html2pdf.js) | PDF export |
+| [DeepSeek API](https://platform.deepseek.com) | AI writing assistant |
+| [Lucide React](https://lucide.dev) | Icons |
+| [Geist Font](https://vercel.com/font) | Typography |
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 18+
+- A [DeepSeek API key](https://platform.deepseek.com/api_keys)
+
+### Installation
+
+```bash
+git clone https://github.com/0x3rn/Slate.git
+cd Slate
+npm install
+```
+
+### Configuration
+
+Create a `.env.local` file in the project root:
+
+```bash
+DEEPSEEK_API_KEY=sk-your-deepseek-api-key
+```
+
+### Development
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Production Build
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+app/
+├── actions/ai.ts          # Server Actions (AI — no key exposed to client)
+├── globals.css             # Theme tokens, custom prose, resize handle
+├── layout.tsx              # Root layout with ThemeProvider
+├── page.tsx               # Main editor (split panes, AI toolbar, PDF export)
+components/
+├── ai-toolbar.tsx          # Floating AI action bar
+├── theme-provider.tsx      # next-themes wrapper
+├── theme-toggle.tsx        # Dark/Light toggle
+public/
+└── slate-logo.svg          # App logo & favicon
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Security
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The DeepSeek API key is only used in **Next.js Server Actions** (`app/actions/ai.ts`) and is never exposed to the browser.
 
-## Deploy on Vercel
+## License
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT

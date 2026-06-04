@@ -18,7 +18,7 @@ marked.setOptions({
   breaks: true,
 });
 
-const DEFAULT_MARKDOWN = `# Welcome to Slate ✨
+const DEFAULT_MARKDOWN = `# Welcome to Slate
 
 A beautiful, AI-powered **Markdown editor** with live preview.
 

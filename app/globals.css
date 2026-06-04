@@ -302,24 +302,6 @@ textarea::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
 }
 
-/* ---- Print styles for PDF export ---- */
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  #pdf-content,
-  #pdf-content * {
-    visibility: visible;
-  }
-  #pdf-content {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    padding: 2rem;
-  }
-}
-
 /* ---- Highlight.js theme overrides ---- */
 .hljs {
   background: transparent !important;

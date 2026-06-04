@@ -75,7 +75,7 @@ export function AIToolbar({ onAction, selectedText }: AIToolbarProps) {
                 isLoading ? "animate-spin" : ""
               }`}
             />
-            <span className="hidden sm:inline">{action.label}</span>
+            <span>{action.label}</span>
             <kbd className="hidden md:inline-flex h-5 items-center gap-0.5 rounded-md border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground/60 group-hover:text-muted-foreground">
               {action.shortcut.replace("⌘", "")}
             </kbd>

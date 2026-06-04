@@ -7,7 +7,6 @@ import { AIToolbar } from "@/components/ai-toolbar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   FileDown,
-  Sparkles,
   GripVertical,
   PanelLeftClose,
   PanelLeftOpen,
@@ -148,42 +147,20 @@ export default function Home() {
         setMarkdown(result);
       } catch (error) {
         console.error("AI action failed:", error);
-        // Revert would happen naturally since we don't update on error
       }
     },
     [markdown]
   );
 
   // ---- PDF Export ----
-  const exportToPdf = useCallback(async () => {
-    try {
-      const html2pdf = (await import("html2pdf.js")).default;
+  const handlePdfExport = useCallback(() => {
+    const el = previewRef.current;
+    if (!el) return;
 
-      const element = previewRef.current;
-      if (!element) return;
-
-      const opt = {
-        margin: [0.5, 0.5, 0.5, 0.5] as [number, number, number, number],
-        filename: "marknote-export.pdf",
-        image: { type: "jpeg" as const, quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          backgroundColor:
-            theme === "dark" ? "#09090b" : "#ffffff",
-        },
-        jsPDF: {
-          unit: "in" as const,
-          format: "a4",
-          orientation: "portrait" as const,
-        },
-      };
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await html2pdf().set(opt as any).from(element).save();
-    } catch (error) {
-      console.error("PDF export failed:", error);
-    }
-  }, [theme]);
+    import("@/lib/pdf-export").then((mod) => {
+      mod.exportToPdf(el);
+    });
+  }, []);
 
   // ---- Keyboard shortcuts ----
   useEffect(() => {
@@ -191,12 +168,12 @@ export default function Home() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "p") {
         e.preventDefault();
-        exportToPdf();
+        handlePdfExport();
       }
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [exportToPdf]);
+  }, [handlePdfExport]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -232,12 +209,12 @@ export default function Home() {
             )}
           </button>
           <button
-            onClick={exportToPdf}
+            onClick={handlePdfExport}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-muted-foreground transition-all duration-150 hover:bg-accent hover:text-accent-foreground"
             title="Export to PDF (⌘P)"
           >
             <FileDown className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">PDF</span>
+            <span>PDF</span>
           </button>
           <div className="mx-1 h-5 w-px bg-border" />
           <ThemeToggle />
@@ -333,7 +310,7 @@ export default function Home() {
           {markdown.length.toLocaleString()} characters
         </span>
         <span className="text-[10px] text-muted-foreground/50">
-          Slate · DeepSeek AI
+          &copy; 2026 Slate
         </span>
       </footer>
     </div>

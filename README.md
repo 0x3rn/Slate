@@ -1,8 +1,6 @@
-# Slate ✨
+# Slate
 
 A beautiful, AI-powered Markdown note-taking app with live preview. Built with Next.js, Tailwind CSS, and DeepSeek AI.
-
-![Slate](public/slate-logo.svg)
 
 ## Features
 

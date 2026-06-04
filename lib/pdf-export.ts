@@ -117,6 +117,7 @@ export function exportToPdf(previewEl: HTMLElement): void {
     "<html>",
     "<head>",
     '<meta charset="utf-8" />',
+    '<meta name="viewport" content="width=device-width, initial-scale=1" />',
     "<title>Slate Export</title>",
     "<style>" + styles + "</style>",
     allStyles ? "<style>" + allStyles + "</style>" : "",
@@ -127,7 +128,20 @@ export function exportToPdf(previewEl: HTMLElement): void {
     "</html>",
   ].join("");
 
-  // Create a hidden iframe in the same page
+  // Detect mobile: touch screen + small screen or mobile user agent
+  const isMobile =
+    /Android|iPhone|iPad|iPod|webOS/i.test(navigator.userAgent) ||
+    (window.innerWidth < 768 && "ontouchstart" in window);
+
+  if (isMobile) {
+    exportMobile(html);
+  } else {
+    exportDesktop(html);
+  }
+}
+
+/** Desktop: hidden iframe + in-tab print dialog */
+function exportDesktop(html: string): void {
   const iframe = document.createElement("iframe");
   iframe.id = "slate-pdf-frame";
   iframe.style.cssText =
@@ -144,23 +158,45 @@ export function exportToPdf(previewEl: HTMLElement): void {
   iframeDoc.write(html);
   iframeDoc.close();
 
-  // Wait for content to render, then print from the iframe
   const iframeWindow = iframe.contentWindow;
   if (!iframeWindow) {
     document.body.removeChild(iframe);
     return;
   }
 
-  // Listen for print completion to clean up
   const handleAfterPrint = () => {
     document.body.removeChild(iframe);
   };
 
   iframeWindow.addEventListener("afterprint", handleAfterPrint, { once: true });
 
-  // Trigger print from within the iframe
   setTimeout(() => {
     iframeWindow.focus();
     iframeWindow.print();
   }, 400);
+}
+
+/** Mobile: Blob URL in new window (triggers native share/save/print) */
+function exportMobile(html: string): void {
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+
+  // Open in a new window — mobile browsers will display it and let user
+  // use the native share/save/print options
+  const w = window.open(url, "_blank");
+
+  if (!w) {
+    // Fallback: trigger a download if popup is blocked
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "slate-export.html";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  // Clean up the blob URL after a delay
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 60000);
 }

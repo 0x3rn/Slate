@@ -27,7 +27,7 @@ export async function aiAction(text: string, action: AIAction): Promise<string> 
 
   try {
     const response = await openai.chat.completions.create({
-      model: "deepseek-chat",
+      model: "deepseek-v4-pro",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: `${ACTION_PROMPTS[action]}\n\n${text}` },

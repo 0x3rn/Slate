@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none">
+  <style>
+    .slate-mark { fill: #09090B; }
+    @media (prefers-color-scheme: dark) { .slate-mark { fill: #FAFAFA; } }
+  </style>
+  <path class="slate-mark" d="M22 8H58L46 26H10L22 8Z" />
+  <path class="slate-mark" d="M10 26L46 26L54 38L18 38L10 26Z" fill-opacity="0.38" />
+  <path class="slate-mark" d="M18 38H54L42 56H6L18 38Z" fill-opacity="0.76" />
+</svg>

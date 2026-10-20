@@ -14,11 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Slate – AI-Powered Markdown Editor",
-  description:
-    "A beautiful, AI-powered Markdown note-taking app with live preview and DeepSeek integration.",
+  title: "Slate — Document, Data & Vector Conversion Suite",
+  description: "All-in-one deterministic and AI-powered conversion studio for Markdown, Rich Text, CSV/JSON/SQL tables, true SVG vectorization, and interactive slide decks.",
   icons: {
-    icon: "/slate-logo.svg",
+    icon: [
+      { url: "/slate-logo.svg?v=3", type: "image/svg+xml" },
+      { url: "/favicon.ico?v=3", sizes: "32x32" },
+    ],
   },
 };
 

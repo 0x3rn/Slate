@@ -123,6 +123,8 @@ export default function Home() {
   const [previewCollapsed, setPreviewCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<"text-to-markdown" | "markdown-to-text">("markdown-to-text");
   const [pdfTheme, setPdfTheme] = useState<DocumentExportTheme>("modern");
+  const [docExportW, setDocExportW] = useState<number>(1240);
+  const [docExportH, setDocExportH] = useState<number>(1754);
   const [aiOutput, setAiOutput] = useState<string | null>(null);
   const [editorVersion, setEditorVersion] = useState(0);
   const [mobileActivePane, setMobileActivePane] = useState<"editor" | "preview">("editor");
@@ -281,9 +283,17 @@ export default function Home() {
     const el = previewRef.current;
     if (!el) return;
     import("@/lib/pdf-export").then((mod) => {
-      mod.exportToPdf(el, pdfTheme);
+      mod.exportToPdf(el, pdfTheme, docExportW, docExportH);
     });
-  }, [pdfTheme]);
+  }, [pdfTheme, docExportW, docExportH]);
+
+  const handleDocPngExport = useCallback(() => {
+    const el = previewRef.current;
+    if (!el) return;
+    import("@/lib/pdf-export").then((mod) => {
+      mod.exportDocumentToPng(el, pdfTheme, docExportW, docExportH);
+    });
+  }, [pdfTheme, docExportW, docExportH]);
 
   const handleCopyRichText = async () => {
     try {
@@ -644,6 +654,37 @@ export default function Home() {
                 <FileDown className="h-3 w-3" /> .TEX
               </button>
 
+              <div className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground" title="Controlled Export Dimensions (px)">
+                <span>Size</span>
+                <input
+                  type="number"
+                  min={300}
+                  max={8000}
+                  step={50}
+                  value={docExportW}
+                  onChange={(e) => setDocExportW(Number(e.target.value) || 1240)}
+                  className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
+                />
+                <span>&times;</span>
+                <input
+                  type="number"
+                  min={300}
+                  max={8000}
+                  step={50}
+                  value={docExportH}
+                  onChange={(e) => setDocExportH(Number(e.target.value) || 1754)}
+                  className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
+                />
+              </div>
+
+              <button
+                onClick={handleDocPngExport}
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                title="Download Controlled-Size .PNG"
+              >
+                <FileDown className="h-3 w-3" /> .PNG
+              </button>
+
               <div className="flex items-center rounded-md border border-border bg-background">
                 <select
                   value={pdfTheme}
@@ -659,8 +700,9 @@ export default function Home() {
                 <button
                   onClick={handlePdfExport}
                   className="inline-flex h-7 items-center gap-1 border-l border-border px-2 text-xs font-medium hover:bg-accent"
+                  title="Download Native Controlled-Size .PDF (No Print Dialog)"
                 >
-                  <FileDown className="h-3 w-3" /> PDF
+                  <FileDown className="h-3 w-3" /> .PDF
                 </button>
               </div>
             </div>

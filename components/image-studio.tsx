@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   VectorizerOptions,
   VectorizeResult,
   RasterPixelData,
   traceImageWithPotrace,
+  parseSvgDimensions,
+  isWhiteFill,
+  getElementFill,
+  stripWhiteBackground,
   optimizeSvgCode,
   svgToReactComponent,
   imageDataToAscii,
   createIcoFromPngBuffers,
 } from "@/lib/converters/image-vectorizer";
+import { generateNativePdfFromSvgs } from "@/lib/pdf-export";
 import {
   downloadBlob,
   downloadTextFile,
@@ -29,8 +34,6 @@ import {
   Loader2,
   ArrowRightLeft,
   Check,
-  Lock,
-  Unlock,
 } from "lucide-react";
 
 interface ImageStudioProps {
@@ -57,57 +60,6 @@ const CONTAINED_MEDIA_STYLE: React.CSSProperties = {
   objectFit: "contain",
   display: "block",
 };
-
-function parseSvgIntrinsicDimensions(svgStr: string): { width: number; height: number } {
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgStr, "image/svg+xml");
-    const svg = doc.querySelector("svg");
-    if (!svg) return { width: 512, height: 512 };
-
-    const viewBox = svg.getAttribute("viewBox");
-    if (viewBox) {
-      const parts = viewBox
-        .trim()
-        .split(/[\s,]+/)
-        .map(Number);
-      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-        return { width: Math.round(parts[2]), height: Math.round(parts[3]) };
-      }
-    }
-
-    const wAttr = parseFloat(svg.getAttribute("width") || "");
-    const hAttr = parseFloat(svg.getAttribute("height") || "");
-    if (wAttr > 0 && hAttr > 0) {
-      return { width: Math.round(wAttr), height: Math.round(hAttr) };
-    }
-  } catch {
-    // fallback
-  }
-  return { width: 512, height: 512 };
-}
-
-function prepareSvgForScale(svgStr: string, targetW: number, targetH: number): string {
-  try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(svgStr, "image/svg+xml");
-    const svg = doc.querySelector("svg");
-    if (!svg) return svgStr;
-
-    if (!svg.getAttribute("xmlns")) {
-      svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-    }
-    if (!svg.getAttribute("viewBox")) {
-      const dims = parseSvgIntrinsicDimensions(svgStr);
-      svg.setAttribute("viewBox", "0 0 " + dims.width + " " + dims.height);
-    }
-    svg.setAttribute("width", String(targetW));
-    svg.setAttribute("height", String(targetH));
-    return new XMLSerializer().serializeToString(svg);
-  } catch {
-    return svgStr;
-  }
-}
 
 function createSampleLogoCanvas(): {
   canvas: HTMLCanvasElement;
@@ -158,6 +110,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
     "raster-to-svg"
   );
 
+  // Raster -> SVG state (using lifted picture-to-svg.html defaults)
   const [sourceElement, setSourceElement] = useState<
     HTMLImageElement | HTMLCanvasElement | null
   >(null);
@@ -166,14 +119,15 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
   const [fileName, setFileName] = useState("vectorized-logo");
   const [customSvgOverride, setCustomSvgOverride] = useState<string | null>(null);
   const [isTracing, setIsTracing] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
   const [vectorResult, setVectorResult] = useState<VectorizeResult | null>(null);
 
   const [options, setOptions] = useState<VectorizerOptions>({
-    maxColors: 4,
-    colorTol: 38,
+    maxColors: 16,
+    colorTol: 16,
     alphaMax: 1.0,
     turdSize: 8,
-    removeBg: true,
+    removeBg: false,
     upscale2x: true,
   });
 
@@ -181,24 +135,35 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
     "preview" | "svg" | "react" | "ascii"
   >("preview");
 
-  // SVG -> PNG state
+  // SVG -> Picture state (using lifted svg-to-picture.html mechanics)
   const [svgInputCode, setSvgInputCode] = useState<string>("");
   const [svgBaseDims, setSvgBaseDims] = useState<{ width: number; height: number }>({
     width: 280,
     height: 280,
   });
+  const [scaleSelect, setScaleSelect] = useState<string>("2");
   const [exportWidth, setExportWidth] = useState<number>(560);
   const [exportHeight, setExportHeight] = useState<number>(560);
-  const [lockAspect, setLockAspect] = useState<boolean>(true);
-  const [exportPadding, setExportPadding] = useState<number>(0);
-  const [exportBgMode, setExportBgMode] = useState<
-    "transparent" | "white" | "dark" | "custom"
-  >("transparent");
-  const [exportCustomBg, setExportCustomBg] = useState<string>("#4f46e5");
+  const [exportFormat, setExportFormat] = useState<
+    "image/png" | "image/webp" | "image/jpeg"
+  >("image/png");
+  const [exportBgMode, setExportBgMode] = useState<"keep" | "transparent" | "custom">(
+    "keep"
+  );
+  const [exportCustomBg, setExportCustomBg] = useState<string>("#ffffff");
+  const [viewerBackdrop, setViewerBackdrop] = useState<
+    "bg-checker" | "bg-dark" | "bg-light"
+  >("bg-checker");
+  const [viewerZoom, setViewerZoom] = useState<number>(100);
+  const [svgValidStatus, setSvgValidStatus] = useState<{ text: string; ok: boolean }>({
+    text: "● Valid SVG",
+    ok: true,
+  });
   const [pngPreviewUrl, setPngPreviewUrl] = useState<string>("");
   const [pngBlobSize, setPngBlobSize] = useState<number>(0);
   const [copiedPng, setCopiedPng] = useState<boolean>(false);
   const [batchStatus, setBatchStatus] = useState<string | null>(null);
+  const renderIdRef = useRef<number>(0);
 
   useEffect(() => {
     const sample = createSampleLogoCanvas();
@@ -211,6 +176,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
     if (!sourceElement) return;
     let cancelled = false;
     setIsTracing(true);
+    setTraceError(null);
 
     traceImageWithPotrace(sourceElement, options)
       .then((res) => {
@@ -220,8 +186,10 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
           setSvgInputCode((prev) => (prev ? prev : res.svg));
         }
       })
-      .catch(() => {
-        console.error("Potrace vectorization failed");
+      .catch((err) => {
+        if (!cancelled) {
+          setTraceError(err instanceof Error ? err.message : "Tracing failed");
+        }
       })
       .finally(() => {
         if (!cancelled) setIsTracing(false);
@@ -235,65 +203,89 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
   const activeSvg = customSvgOverride ?? vectorResult?.svg ?? "";
   const effectiveSvgForRaster = svgInputCode.trim() || activeSvg;
 
-  // Inject inline max-width/max-height onto preview SVG so it behaves identically to your index.html CSS
   const previewReadySvg = activeSvg.replace(
     /<svg([^>]*)>/,
     '<svg$1 style="max-width:100%;max-height:260px;width:auto;height:auto;display:block;">'
   );
 
+  // Lifted SVG-to-Picture rendering engine (with white BG flood-fill stripper & destination-over composite)
   const renderSvgToBlob = useCallback(
     (
       svgStr: string,
       width: number,
       height: number,
-      mimeType: string,
-      bgFill: string | null = null,
-      padding = 0
+      mimeType: "image/png" | "image/webp" | "image/jpeg",
+      bgModeVal: "keep" | "transparent" | "custom",
+      customHex: string
     ): Promise<Blob> => {
       return new Promise((resolve, reject) => {
-        const safeW = Math.max(16, Math.min(4096, Math.round(width)));
-        const safeH = Math.max(16, Math.min(4096, Math.round(height)));
-        const pad = Math.max(
-          0,
-          Math.min(Math.floor(Math.min(safeW, safeH) / 3), padding)
-        );
-        const drawW = Math.max(8, safeW - pad * 2);
-        const drawH = Math.max(8, safeH - pad * 2);
+        const parsed = parseSvgDimensions(svgStr);
+        if (!parsed) {
+          reject(new Error("Invalid SVG XML"));
+          return;
+        }
 
-        const scaledSvg = prepareSvgForScale(svgStr, drawW, drawH);
+        const targetW = Math.max(16, Math.min(10000, Math.round(width || parsed.w)));
+        const targetH = Math.max(16, Math.min(10000, Math.round(height || parsed.h)));
+        const { svgEl } = parsed;
+
+        svgEl.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        if (!svgEl.hasAttribute("viewBox")) {
+          svgEl.setAttribute("viewBox", "0 0 " + parsed.w + " " + parsed.h);
+        }
+        svgEl.setAttribute("width", String(targetW));
+        svgEl.setAttribute("height", String(targetH));
+
+        if (bgModeVal === "transparent" || bgModeVal === "custom") {
+          svgEl.querySelectorAll(":scope > rect").forEach((rect) => {
+            const rw = rect.getAttribute("width") || "";
+            const rh = rect.getAttribute("height") || "";
+            const fullW = rw === "100%" || parseFloat(rw) >= parsed.w * 0.98;
+            const fullH = rh === "100%" || parseFloat(rh) >= parsed.h * 0.98;
+            if (
+              fullW &&
+              fullH &&
+              (bgModeVal === "custom" || isWhiteFill(getElementFill(rect)))
+            ) {
+              rect.remove();
+            }
+          });
+        }
+
+        const serialized = new XMLSerializer().serializeToString(svgEl);
+        const blob = new Blob([serialized], { type: "image/svg+xml;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+
         const img = new window.Image();
-        const svgBlob = new Blob([scaledSvg], {
-          type: "image/svg+xml;charset=utf-8",
-        });
-        const url = URL.createObjectURL(svgBlob);
-
         img.onload = () => {
+          URL.revokeObjectURL(url);
           const canvas = document.createElement("canvas");
-          canvas.width = safeW;
-          canvas.height = safeH;
-          const ctx = canvas.getContext("2d")!;
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+          ctx.clearRect(0, 0, targetW, targetH);
+          ctx.drawImage(img, 0, 0, targetW, targetH);
 
-          if (bgFill) {
-            ctx.fillStyle = bgFill;
-            ctx.fillRect(0, 0, safeW, safeH);
-          } else if (mimeType === "image/jpeg") {
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, safeW, safeH);
+          if (bgModeVal === "transparent" || bgModeVal === "custom") {
+            stripWhiteBackground(ctx, targetW, targetH);
           }
 
-          ctx.drawImage(img, pad, pad, drawW, drawH);
-          URL.revokeObjectURL(url);
+          if (bgModeVal === "custom" || mimeType === "image/jpeg") {
+            ctx.globalCompositeOperation = "destination-over";
+            ctx.fillStyle = bgModeVal === "custom" ? customHex : "#ffffff";
+            ctx.fillRect(0, 0, targetW, targetH);
+            ctx.globalCompositeOperation = "source-over";
+          }
+
           canvas.toBlob(
-            (b) => (b ? resolve(b) : reject(new Error("Canvas export failed"))),
+            (out) => (out ? resolve(out) : reject(new Error("Canvas export failed"))),
             mimeType,
-            0.95
+            0.98
           );
         };
         img.onerror = () => {
           URL.revokeObjectURL(url);
-          reject(new Error("Invalid SVG markup"));
+          reject(new Error("SVG failed to render"));
         };
         img.src = url;
       });
@@ -301,38 +293,42 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
     []
   );
 
-  const resolvedBgColor =
-    exportBgMode === "transparent"
-      ? null
-      : exportBgMode === "white"
-      ? "#ffffff"
-      : exportBgMode === "dark"
-      ? "#09090b"
-      : exportCustomBg;
-
   useEffect(() => {
-    if (studioMode !== "svg-to-png" || !effectiveSvgForRaster.includes("<svg")) return;
-    let cancelled = false;
-    let createdUrl = "";
+    if (studioMode !== "svg-to-png") return;
+    const myRender = ++renderIdRef.current;
+    const parsed = parseSvgDimensions(effectiveSvgForRaster);
+    if (!parsed) {
+      setSvgValidStatus({ text: "⚠️ Invalid SVG XML", ok: false });
+      return;
+    }
+    setSvgValidStatus({ text: "● Valid SVG", ok: true });
+    setSvgBaseDims({ width: parsed.w, height: parsed.h });
 
-    renderSvgToBlob(
-      effectiveSvgForRaster,
-      exportWidth,
-      exportHeight,
-      "image/png",
-      resolvedBgColor,
-      exportPadding
-    )
-      .then((blob) => {
-        if (cancelled) return;
-        createdUrl = URL.createObjectURL(blob);
-        setPngPreviewUrl(createdUrl);
-        setPngBlobSize(blob.size);
-      })
-      .catch(() => {});
+    let createdUrl = "";
+    const timer = setTimeout(() => {
+      renderSvgToBlob(
+        effectiveSvgForRaster,
+        exportWidth,
+        exportHeight,
+        exportFormat,
+        exportBgMode,
+        exportCustomBg
+      )
+        .then((blob) => {
+          if (myRender !== renderIdRef.current) return;
+          createdUrl = URL.createObjectURL(blob);
+          setPngPreviewUrl(createdUrl);
+          setPngBlobSize(blob.size);
+        })
+        .catch(() => {
+          if (myRender === renderIdRef.current) {
+            setSvgValidStatus({ text: "⚠️ SVG failed to render", ok: false });
+          }
+        });
+    }, 120);
 
     return () => {
-      cancelled = true;
+      clearTimeout(timer);
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [
@@ -340,20 +336,27 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
     effectiveSvgForRaster,
     exportWidth,
     exportHeight,
-    resolvedBgColor,
-    exportPadding,
+    exportFormat,
+    exportBgMode,
+    exportCustomBg,
     renderSvgToBlob,
   ]);
 
-  const loadSvgStringIntoRasterizer = useCallback((rawSvg: string, name?: string) => {
-    if (name) setFileName(name);
-    setSvgInputCode(rawSvg);
-    const dims = parseSvgIntrinsicDimensions(rawSvg);
-    setSvgBaseDims(dims);
-    setExportWidth(dims.width * 2);
-    setExportHeight(dims.height * 2);
-    setStudioMode("svg-to-png");
-  }, []);
+  const loadSvgStringIntoRasterizer = useCallback(
+    (rawSvg: string, name?: string) => {
+      if (name) setFileName(name);
+      setSvgInputCode(rawSvg);
+      const parsed = parseSvgDimensions(rawSvg);
+      if (parsed) {
+        const s = parseFloat(scaleSelect) || 1;
+        setSvgBaseDims({ width: parsed.w, height: parsed.h });
+        setExportWidth(Math.round(parsed.w * s));
+        setExportHeight(Math.round(parsed.h * s));
+      }
+      setStudioMode("svg-to-png");
+    },
+    [scaleSelect]
+  );
 
   const loadImageFile = useCallback(
     (file: File) => {
@@ -405,43 +408,44 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
     return () => window.removeEventListener("paste", handlePaste);
   }, [loadImageFile]);
 
-  const applyScalePreset = (mult: number) => {
+  const applyScalePreset = (scaleStr: string) => {
+    setScaleSelect(scaleStr);
+    const mult = parseFloat(scaleStr) || 1;
     setExportWidth(Math.max(16, Math.round(svgBaseDims.width * mult)));
     setExportHeight(Math.max(16, Math.round(svgBaseDims.height * mult)));
   };
 
   const handleWidthChange = (newW: number) => {
-    const clamped = Math.max(16, Math.min(4096, newW || 16));
+    const clamped = Math.max(16, Math.min(10000, newW || svgBaseDims.width));
+    const ratio = svgBaseDims.height / (svgBaseDims.width || 1);
     setExportWidth(clamped);
-    if (lockAspect && svgBaseDims.width > 0) {
-      setExportHeight(
-        Math.max(16, Math.round((clamped * svgBaseDims.height) / svgBaseDims.width))
-      );
-    }
+    setExportHeight(Math.max(16, Math.round(clamped * ratio)));
   };
 
   const handleHeightChange = (newH: number) => {
-    const clamped = Math.max(16, Math.min(4096, newH || 16));
+    const clamped = Math.max(16, Math.min(10000, newH || svgBaseDims.height));
+    const ratio = svgBaseDims.width / (svgBaseDims.height || 1);
     setExportHeight(clamped);
-    if (lockAspect && svgBaseDims.height > 0) {
-      setExportWidth(
-        Math.max(16, Math.round((clamped * svgBaseDims.width) / svgBaseDims.height))
-      );
-    }
+    setExportWidth(Math.max(16, Math.round(clamped * ratio)));
   };
 
-  const handleDownloadRaster = async (format: "png" | "webp" | "jpeg") => {
+  const handleDownloadRaster = async (
+    fmt: "image/png" | "image/webp" | "image/jpeg" = exportFormat
+  ) => {
     if (!effectiveSvgForRaster) return;
     const blob = await renderSvgToBlob(
       effectiveSvgForRaster,
       exportWidth,
       exportHeight,
-      "image/" + format,
-      resolvedBgColor,
-      exportPadding
+      fmt,
+      exportBgMode,
+      exportCustomBg
     );
-    const ext = format === "jpeg" ? "jpg" : format;
-    downloadBlob(blob, fileName + "-" + exportWidth + "x" + exportHeight + "." + ext);
+    const ext = fmt === "image/jpeg" ? "jpeg" : fmt.split("/")[1];
+    downloadBlob(
+      blob,
+      "rendered-image-" + exportWidth + "x" + exportHeight + "." + ext
+    );
   };
 
   const handleCopyPngToClipboard = async () => {
@@ -452,12 +456,12 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
         exportWidth,
         exportHeight,
         "image/png",
-        resolvedBgColor,
-        exportPadding
+        exportBgMode,
+        exportCustomBg
       );
       await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
       setCopiedPng(true);
-      setTimeout(() => setCopiedPng(false), 2000);
+      setTimeout(() => setCopiedPng(false), 1800);
     } catch {
       console.error("Copy PNG failed");
     }
@@ -475,8 +479,8 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
         sz,
         sz,
         "image/png",
-        resolvedBgColor,
-        exportPadding
+        exportBgMode,
+        exportCustomBg
       );
       pngMap.set(sz, new Uint8Array(await blob.arrayBuffer()));
     }
@@ -504,31 +508,33 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
   const handleBatchSvgToPngZip = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
-    setBatchStatus("Converting " + files.length + " SVGs to PNG...");
+    setBatchStatus("Converting " + files.length + " SVGs to Picture...");
 
     const entries: ZipEntry[] = [];
     for (const file of files) {
       const svgText = await file.text();
-      const dims = parseSvgIntrinsicDimensions(svgText);
-      const targetW = exportWidth || dims.width * 2;
-      const targetH = exportHeight || dims.height * 2;
+      const parsed = parseSvgDimensions(svgText);
+      const mult = parseFloat(scaleSelect) || 1;
+      const targetW = parsed ? Math.round(parsed.w * mult) : exportWidth;
+      const targetH = parsed ? Math.round(parsed.h * mult) : exportHeight;
       const blob = await renderSvgToBlob(
         svgText,
         targetW,
         targetH,
-        "image/png",
-        resolvedBgColor,
-        exportPadding
+        exportFormat,
+        exportBgMode,
+        exportCustomBg
       );
+      const ext = exportFormat.split("/")[1];
       const base = file.name.replace(/\.[^.]+$/, "") || "icon";
       entries.push({
-        name: base + "-" + targetW + "x" + targetH + ".png",
+        name: base + "-" + targetW + "x" + targetH + "." + ext,
         data: new Uint8Array(await blob.arrayBuffer()),
       });
     }
 
-    downloadZipArchive(entries, "batch-svg-to-png.zip");
-    setBatchStatus("Exported " + entries.length + " PNGs (.zip)!");
+    downloadZipArchive(entries, "batch-svg-to-picture.zip");
+    setBatchStatus("Exported " + entries.length + " pictures (.zip)!");
     setTimeout(() => setBatchStatus(null), 4000);
   };
 
@@ -561,7 +567,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto lg:overflow-hidden bg-background">
-      {/* Top Studio Bar */}
+      {/* Top Studio Bar (Slate's Native Layout & Theme) */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card/60 px-4 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center rounded-lg bg-muted/70 p-0.5">
@@ -575,7 +581,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
               }
             >
               <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
-              PNG / JPG &rarr; SVG
+              Picture to SVG
             </button>
             <button
               onClick={() => {
@@ -593,7 +599,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
               }
             >
               <ArrowRightLeft className="h-3.5 w-3.5 text-blue-500" />
-              SVG &rarr; PNG / WebP / JPG
+              SVG to Picture
             </button>
           </div>
 
@@ -601,7 +607,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
             <>
               <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">
                 <Upload className="h-3.5 w-3.5" />
-                <span>Upload PNG / JPG</span>
+                <span>Upload Image</span>
                 <input
                   type="file"
                   accept="image/*"
@@ -628,7 +634,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
             <>
               <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90">
                 <Upload className="h-3.5 w-3.5" />
-                <span>Upload .SVG File</span>
+                <span>Load .SVG File</span>
                 <input
                   type="file"
                   accept=".svg,image/svg+xml"
@@ -641,7 +647,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
 
               <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-medium hover:bg-accent">
                 <FolderArchive className="h-3.5 w-3.5" />
-                <span>Batch .SVG &rarr; .PNG (.zip)</span>
+                <span>Batch .SVG &rarr; Picture (.zip)</span>
                 <input
                   type="file"
                   multiple
@@ -656,8 +662,11 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
           {isTracing && (
             <span className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-500">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Tracing...
+              Tracing vector paths...
             </span>
+          )}
+          {traceError && (
+            <span className="text-xs font-medium text-destructive">{traceError}</span>
           )}
           {batchStatus && (
             <span className="text-xs font-medium text-emerald-500">{batchStatus}</span>
@@ -672,7 +681,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-medium hover:bg-accent"
               >
                 <ArrowRightLeft className="h-3.5 w-3.5" />
-                Convert SVG &rarr; PNG
+                Convert SVG &rarr; Picture
               </button>
               <button
                 onClick={() => navigator.clipboard.writeText(activeSvg)}
@@ -704,14 +713,14 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}
-                <span>{copiedPng ? "Copied PNG!" : "Copy PNG"}</span>
+                <span>{copiedPng ? "Copied Picture!" : "Copy Picture (PNG)"}</span>
               </button>
               <button
-                onClick={() => handleDownloadRaster("png")}
+                onClick={() => handleDownloadRaster(exportFormat)}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-500"
               >
                 <FileDown className="h-3.5 w-3.5" />
-                Download .PNG ({exportWidth}&times;{exportHeight})
+                Download Picture ({exportWidth}&times;{exportHeight})
               </button>
               <button
                 onClick={handleDownloadMultiSizePngZip}
@@ -726,7 +735,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
       </div>
 
       {/* =================================================================== */}
-      {/* MODE 1: PNG / JPG -> SVG (Potrace Wasm Vectorizer)                  */}
+      {/* MODE 1: PICTURE TO SVG (Slate Layout + Lifted Engine)               */}
       {/* =================================================================== */}
       {studioMode === "raster-to-svg" && (
         <div className="flex flex-col lg:grid lg:flex-1 lg:grid-cols-12 lg:overflow-hidden">
@@ -742,8 +751,8 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
               </div>
               <input
                 type="range"
-                min={2}
-                max={12}
+                min={1}
+                max={32}
                 step={1}
                 value={options.maxColors}
                 onChange={(e) =>
@@ -764,7 +773,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
               </div>
               <input
                 type="range"
-                min={15}
+                min={2}
                 max={80}
                 step={1}
                 value={options.colorTol}
@@ -919,7 +928,6 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
 
             {inspectorTab === "preview" && (
               <div className="grid grid-cols-1 gap-5 p-4 pb-12 md:grid-cols-2 md:p-6">
-                {/* Original Raster Card */}
                 <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs">
                   <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs font-semibold">
                     <span>Original Raster Image</span>
@@ -944,14 +952,13 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                   </div>
                 </div>
 
-                {/* Vectorized SVG Card */}
                 <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs">
                   <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs font-semibold">
                     <span>Vectorized SVG Output</span>
                     <div className="flex items-center gap-1.5">
-                      {vectorResult?.palette.map((hex) => (
+                      {vectorResult?.palette.map((hex, i) => (
                         <span
-                          key={hex}
+                          key={hex + i}
                           title={hex}
                           className="h-4 w-4 rounded border border-black/20"
                           style={{ backgroundColor: hex }}
@@ -1041,7 +1048,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
       )}
 
       {/* =================================================================== */}
-      {/* MODE 2: Dedicated SVG -> PNG / WebP / JPG Converter                 */}
+      {/* MODE 2: SVG TO PICTURE (Slate Layout + Lifted svg-to-picture Engine)*/}
       {/* =================================================================== */}
       {studioMode === "svg-to-png" && (
         <div
@@ -1053,46 +1060,52 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
             if (f) loadImageFile(f);
           }}
         >
-          <div className="flex shrink-0 flex-col gap-4 border-b border-border bg-card/30 p-4 lg:col-span-3 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <div className="flex shrink-0 flex-col gap-3.5 border-b border-border bg-card/30 p-4 lg:col-span-3 lg:overflow-y-auto lg:border-b-0 lg:border-r">
             <div>
-              <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Quick Resolution Scale
-              </span>
-              <div className="grid grid-cols-5 gap-1">
-                {[1, 2, 4, 8, 16].map((mult) => (
-                  <button
-                    key={mult}
-                    onClick={() => applyScalePreset(mult)}
-                    className={
-                      "rounded-md border py-1.5 font-mono text-xs font-medium transition-all " +
-                      (exportWidth === Math.round(svgBaseDims.width * mult)
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border bg-background hover:bg-accent")
-                    }
-                  >
-                    {mult}x
-                  </button>
-                ))}
-              </div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Output Format
+              </label>
+              <select
+                value={exportFormat}
+                onChange={(e) =>
+                  setExportFormat(
+                    e.target.value as "image/png" | "image/webp" | "image/jpeg"
+                  )
+                }
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+              >
+                <option value="image/png">PNG (Lossless / Transparent)</option>
+                <option value="image/webp">WebP (Crisp &amp; Small File)</option>
+                <option value="image/jpeg">JPEG (Solid Background)</option>
+              </select>
             </div>
 
             <div>
-              <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Output Dimensions (px)
+              <div className="mb-1 flex justify-between text-xs">
+                <span className="font-medium text-muted-foreground">
+                  Resolution Scale
                 </span>
-                <button
-                  onClick={() => setLockAspect((l) => !l)}
-                  className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
-                >
-                  {lockAspect ? (
-                    <Lock className="h-3 w-3 text-blue-500" />
-                  ) : (
-                    <Unlock className="h-3 w-3" />
-                  )}
-                  <span>{lockAspect ? "Locked" : "Unlocked"}</span>
-                </button>
+                <span className="font-mono font-semibold text-foreground">
+                  {scaleSelect}x
+                </span>
               </div>
+              <select
+                value={scaleSelect}
+                onChange={(e) => applyScalePreset(e.target.value)}
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+              >
+                <option value="0.5">0.5x (Half Size)</option>
+                <option value="1">1x (Original ViewBox)</option>
+                <option value="2">2x (Retina / 2K)</option>
+                <option value="4">4x (Ultra HD / 4K)</option>
+                <option value="8">8x (Print / 8K)</option>
+              </select>
+            </div>
+
+            <div>
+              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Custom Width &times; Height (px)
+              </span>
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="mb-1 block text-[10px] text-muted-foreground">
@@ -1101,7 +1114,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                   <input
                     type="number"
                     min={16}
-                    max={4096}
+                    max={10000}
                     value={exportWidth}
                     onChange={(e) => handleWidthChange(Number(e.target.value))}
                     className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
@@ -1114,7 +1127,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                   <input
                     type="number"
                     min={16}
-                    max={4096}
+                    max={10000}
                     value={exportHeight}
                     onChange={(e) => handleHeightChange(Number(e.target.value))}
                     className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
@@ -1124,50 +1137,22 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
             </div>
 
             <div>
-              <div className="mb-1 flex justify-between text-xs">
-                <span className="font-medium text-muted-foreground">Outer Padding</span>
-                <span className="font-mono font-semibold text-foreground">
-                  {exportPadding}px
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={120}
-                step={4}
-                value={exportPadding}
-                onChange={(e) => setExportPadding(Number(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            <div>
-              <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Background Fill
-              </span>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(
-                  [
-                    { id: "transparent", label: "Transparent" },
-                    { id: "white", label: "White (#FFF)" },
-                    { id: "dark", label: "Dark (#09090B)" },
-                    { id: "custom", label: "Custom Color" },
-                  ] as const
-                ).map((bg) => (
-                  <button
-                    key={bg.id}
-                    onClick={() => setExportBgMode(bg.id)}
-                    className={
-                      "rounded-md border px-2 py-1.5 text-xs font-medium " +
-                      (exportBgMode === bg.id
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-border bg-background hover:bg-accent")
-                    }
-                  >
-                    {bg.label}
-                  </button>
-                ))}
-              </div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Export Background
+              </label>
+              <select
+                value={exportBgMode}
+                onChange={(e) =>
+                  setExportBgMode(
+                    e.target.value as "keep" | "transparent" | "custom"
+                  )
+                }
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+              >
+                <option value="keep">Keep SVG&apos;s Original (BG or No BG)</option>
+                <option value="transparent">Force Transparent (Strip White BG)</option>
+                <option value="custom">Custom Solid Color</option>
+              </select>
               {exportBgMode === "custom" && (
                 <div className="mt-2 flex items-center gap-2">
                   <input
@@ -1186,32 +1171,79 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
               )}
             </div>
 
+            <div>
+              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Viewer Backdrop
+              </label>
+              <select
+                value={viewerBackdrop}
+                onChange={(e) =>
+                  setViewerBackdrop(
+                    e.target.value as "bg-checker" | "bg-dark" | "bg-light"
+                  )
+                }
+                className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+              >
+                <option value="bg-checker">Transparency Grid</option>
+                <option value="bg-dark">Dark Canvas (Clean)</option>
+                <option value="bg-light">Light Canvas</option>
+              </select>
+            </div>
+
+            <div>
+              <div className="mb-1 flex justify-between text-xs">
+                <span className="font-medium text-muted-foreground">Viewer Zoom</span>
+                <span className="font-mono font-semibold text-foreground">
+                  {viewerZoom}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={25}
+                max={300}
+                value={viewerZoom}
+                onChange={(e) => setViewerZoom(Number(e.target.value))}
+                className="w-full"
+              />
+            </div>
+
             <div className="border-t border-border pt-3">
               <span className="mb-2 block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Download Format
+                Quick Export
               </span>
-              <div className="flex flex-col gap-1.5">
+              <div className="grid grid-cols-4 gap-1.5">
                 <button
-                  onClick={() => handleDownloadRaster("png")}
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-500"
+                  onClick={() => handleDownloadRaster("image/png")}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background text-xs font-medium hover:bg-accent"
                 >
-                  <FileDown className="h-3.5 w-3.5" />
-                  Download .PNG ({exportWidth}&times;{exportHeight})
+                  .PNG
                 </button>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    onClick={() => handleDownloadRaster("webp")}
-                    className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-background text-xs font-medium hover:bg-accent"
-                  >
-                    <FileDown className="h-3 w-3" /> .WebP
-                  </button>
-                  <button
-                    onClick={() => handleDownloadRaster("jpeg")}
-                    className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-background text-xs font-medium hover:bg-accent"
-                  >
-                    <FileDown className="h-3 w-3" /> .JPG
-                  </button>
-                </div>
+                <button
+                  onClick={() => handleDownloadRaster("image/webp")}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background text-xs font-medium hover:bg-accent"
+                >
+                  .WebP
+                </button>
+                <button
+                  onClick={() => handleDownloadRaster("image/jpeg")}
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background text-xs font-medium hover:bg-accent"
+                >
+                  .JPG
+                </button>
+                <button
+                  onClick={() =>
+                    generateNativePdfFromSvgs(
+                      [effectiveSvgForRaster],
+                      exportWidth,
+                      exportHeight,
+                      fileName + "-" + exportWidth + "x" + exportHeight + ".pdf",
+                      exportBgMode === "custom" ? exportCustomBg : "#ffffff"
+                    )
+                  }
+                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-background text-xs font-medium hover:bg-accent"
+                >
+                  .PDF
+                </button>
               </div>
             </div>
 
@@ -1223,13 +1255,13 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                 </span>
               </div>
               <div className="flex justify-between py-0.5">
-                <span className="text-muted-foreground">PNG Output:</span>
+                <span className="text-muted-foreground">Picture Output:</span>
                 <span className="font-mono font-semibold text-blue-500">
                   {exportWidth} &times; {exportHeight}px
                 </span>
               </div>
               <div className="flex justify-between py-0.5">
-                <span className="text-muted-foreground">Est. PNG Size:</span>
+                <span className="text-muted-foreground">Est. File Size:</span>
                 <span className="font-mono">
                   {pngBlobSize > 0 ? (pngBlobSize / 1024).toFixed(1) + " KB" : "—"}
                 </span>
@@ -1240,30 +1272,28 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
           <div className="grid grid-cols-1 gap-5 p-4 pb-12 md:grid-cols-2 md:p-6 lg:col-span-9 lg:overflow-y-auto">
             <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs">
               <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs font-semibold">
-                <span>Source &lt;SVG&gt; Markup (Paste or Edit)</span>
-                <button
-                  onClick={() => {
-                    const dims = parseSvgIntrinsicDimensions(effectiveSvgForRaster);
-                    setSvgBaseDims(dims);
-                    setExportWidth(dims.width * 2);
-                    setExportHeight(dims.height * 2);
-                  }}
-                  className="text-[11px] font-medium text-blue-500 hover:underline"
+                <span>SVG Source Code (Paste or Edit Live)</span>
+                <span
+                  style={{ color: svgValidStatus.ok ? "#10b981" : "#ef4444" }}
+                  className="text-xs font-normal"
                 >
-                  Auto-Fit Dimensions
-                </button>
+                  {svgValidStatus.text}
+                </span>
               </div>
               <textarea
                 value={effectiveSvgForRaster}
                 onChange={(e) => {
                   const val = e.target.value;
                   setSvgInputCode(val);
-                  if (val.includes("<svg")) {
-                    const dims = parseSvgIntrinsicDimensions(val);
-                    setSvgBaseDims(dims);
+                  const parsed = parseSvgDimensions(val);
+                  if (parsed) {
+                    const s = parseFloat(scaleSelect) || 1;
+                    setSvgBaseDims({ width: parsed.w, height: parsed.h });
+                    setExportWidth(Math.round(parsed.w * s));
+                    setExportHeight(Math.round(parsed.h * s));
                   }
                 }}
-                placeholder="Paste your <svg>...</svg> code here or upload an .svg file..."
+                placeholder="Paste your <svg>...</svg> code here or load an .svg file..."
                 className="min-h-[260px] flex-1 resize-none bg-transparent p-4 font-mono text-xs leading-relaxed focus:outline-none"
                 spellCheck={false}
               />
@@ -1271,25 +1301,35 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
 
             <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs">
               <div className="flex items-center justify-between border-b border-border px-4 py-3 text-xs font-semibold">
-                <span>Live Rasterized .PNG Preview</span>
+                <span>Rendered Picture Preview (True Raster Output)</span>
                 <span className="font-mono font-normal text-muted-foreground">
-                  {exportWidth} &times; {exportHeight}px
+                  {exportWidth} &times; {exportHeight} px
                 </span>
               </div>
               <div
-                className="flex items-center justify-center p-5"
-                style={CHECKERBOARD_STYLE}
+                className="flex flex-1 items-center justify-center overflow-auto p-5"
+                style={
+                  viewerBackdrop === "bg-checker"
+                    ? CHECKERBOARD_STYLE
+                    : viewerBackdrop === "bg-light"
+                    ? { background: "#ffffff", minHeight: "260px" }
+                    : { background: "#090d16", minHeight: "260px" }
+                }
               >
                 {pngPreviewUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={pngPreviewUrl}
-                    alt="Rendered PNG Preview"
-                    style={CONTAINED_MEDIA_STYLE}
+                    alt="Rendered Picture Preview"
+                    style={{
+                      ...CONTAINED_MEDIA_STYLE,
+                      transform: "scale(" + viewerZoom / 100 + ")",
+                      transition: "transform 0.15s ease",
+                    }}
                   />
                 ) : (
                   <span className="text-xs text-muted-foreground">
-                    Paste valid &lt;svg&gt; code or upload an .svg file to preview PNG
+                    Paste valid &lt;svg&gt; code or load an .svg file to preview picture
                   </span>
                 )}
               </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { HorizontalScrollStrip } from "@/components/horizontal-scroll-strip";
 import {
   MmNode,
   MmNodeShape,
@@ -17,9 +18,12 @@ import {
   SLIDE_PRESET_PREVIEWS,
   SVG_BG_PRESETS,
   renderBgDesignSvgNode,
+  renderSvgMultilineText,
   stripMarkdownSyntax,
+  getNodeAutoSize,
   getNodeBoxSize,
   clampSingleMmNode,
+  getSlideElEffectiveBox,
   clampSingleSlideElement,
   applyMindMapLayoutAlgorithm,
   buildSlideSvgContent,
@@ -51,6 +55,7 @@ import {
   ArrowUp,
   ArrowDown,
   Sparkles,
+  AlignCenter,
 } from "lucide-react";
 
 interface VisualStudioProps {
@@ -74,6 +79,122 @@ interface SlideSnapshot {
   slideDocH: number;
 }
 
+const CANVAS_BOUND_PAD = 14;
+const QUICK_NODE_COLORS = [
+  "#6366f1",
+  "#ec4899",
+  "#10b981",
+  "#f59e0b",
+  "#0ea5e9",
+  "#8b5cf6",
+  "#1e293b",
+];
+
+function isHexColorLight(hex: string): boolean {
+  const clean = (hex || "#0f172a").replace("#", "");
+  if (clean.length !== 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  return r * 0.299 + g * 0.587 + b * 0.114 > 165;
+}
+
+function getMindMapStructureBounds(nodes: MmNode[]) {
+  if (!nodes.length) return { x: 100, y: 100, w: 400, h: 300, cx: 300, cy: 250 };
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  nodes.forEach((n) => {
+    const { w, h } = getNodeBoxSize(n);
+    minX = Math.min(minX, n.x - w / 2);
+    maxX = Math.max(maxX, n.x + w / 2);
+    minY = Math.min(minY, n.y - h / 2);
+    maxY = Math.max(maxY, n.y + h / 2);
+  });
+  const pad = 28;
+  return {
+    x: Math.round(minX - pad),
+    y: Math.round(minY - pad),
+    w: Math.round(maxX - minX + pad * 2),
+    h: Math.round(maxY - minY + pad * 2),
+    cx: Math.round((minX + maxX) / 2),
+    cy: Math.round((minY + maxY) / 2),
+  };
+}
+
+function getSlideStructureBounds(slide: VisualSlide | undefined) {
+  if (!slide || !slide.elements.length) {
+    return { x: 80, y: 80, w: 400, h: 300, cx: 280, cy: 230, rawW: 400, rawH: 300 };
+  }
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  slide.elements.forEach((el) => {
+    const eff = getSlideElEffectiveBox(el);
+    minX = Math.min(minX, el.x);
+    maxX = Math.max(maxX, el.x + eff.w);
+    minY = Math.min(minY, el.y);
+    maxY = Math.max(maxY, el.y + eff.h);
+  });
+  const pad = 12;
+  return {
+    x: Math.round(minX - pad),
+    y: Math.round(minY - pad),
+    w: Math.round(maxX - minX + pad * 2),
+    h: Math.round(maxY - minY + pad * 2),
+    cx: Math.round((minX + maxX) / 2),
+    cy: Math.round((minY + maxY) / 2),
+    rawW: Math.max(1, maxX - minX),
+    rawH: Math.max(1, maxY - minY),
+  };
+}
+
+function NumberStepper({
+  value,
+  min = 0,
+  max = 9999,
+  step = 1,
+  onChange,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  onChange: (val: number) => void;
+}) {
+  return (
+    <div className="flex h-7 items-center overflow-hidden rounded-md border border-border bg-background">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(min, (value || 0) - step))}
+        className="flex h-full w-6 shrink-0 items-center justify-center border-r border-border text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        &minus;
+      </button>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) =>
+          onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))
+        }
+        className="h-full w-full bg-transparent px-1 text-center font-mono text-xs text-foreground focus:outline-none"
+      />
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(max, (value || 0) + step))}
+        className="flex h-full w-6 shrink-0 items-center justify-center border-l border-border text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
 export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
   const [activeTab, setActiveTab] = useState<"mindmap" | "slides">("mindmap");
 
@@ -82,6 +203,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     JSON.parse(JSON.stringify(DEFAULT_MM_NODES))
   );
   const [selectedMmId, setSelectedMmId] = useState<string | null>("n1");
+  const [wholeMmFocused, setWholeMmFocused] = useState<boolean>(false);
   const [mmLayout, setMmLayout] = useState<MmLayoutMode>("mindmap");
   const [mmThemeId, setMmThemeId] = useState<string>(() =>
     darkMode ? "default" : "daylight"
@@ -104,7 +226,6 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
   const [mmHistory, setMmHistory] = useState<string[]>([]);
   const [mmRedoStack, setMmRedoStack] = useState<string[]>([]);
 
-  // Sync default Mind Map canvas backdrop when user toggles Slate's Light/Dark mode
   useEffect(() => {
     setMmBgConfig((prev) => {
       if (darkMode && prev.presetId === "bg04") {
@@ -124,6 +245,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
   );
   const [currentSlideIdx, setCurrentSlideIdx] = useState<number>(0);
   const [selectedSlideElId, setSelectedSlideElId] = useState<string | null>("e2");
+  const [wholeSlideFocused, setWholeSlideFocused] = useState<boolean>(false);
   const [slideDocW, setSlideDocW] = useState<number>(1600);
   const [slideDocH, setSlideDocH] = useState<number>(900);
   const [slideHistory, setSlideHistory] = useState<string[]>([]);
@@ -142,6 +264,16 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
 
   useEffect(() => {
     ensureEmbeddedGoogleFonts();
+  }, []);
+
+  const selectMmNode = useCallback((id: string | null) => {
+    setSelectedMmId(id);
+    if (id !== null) setWholeMmFocused(false);
+  }, []);
+
+  const selectSlideElement = useCallback((id: string | null) => {
+    setSelectedSlideElId(id);
+    if (id !== null) setWholeSlideFocused(false);
   }, []);
 
   const saveMmHistory = useCallback(() => {
@@ -244,6 +376,236 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     slideDocH,
   ]);
 
+  // ArrowUp / ArrowDown Scaling for Single Node/Element OR Whole Mind Map / Whole Slide
+  const scaleByArrowKey = useCallback(
+    (factor: number): boolean => {
+      if (activeTab === "mindmap") {
+        const maxW = mmDocW - CANVAS_BOUND_PAD * 2;
+        const maxH = mmDocH - CANVAS_BOUND_PAD * 2;
+
+        if (selectedMmId) {
+          const node = mmNodes.find((n) => n.id === selectedMmId);
+          if (!node) return false;
+          const { w, h } = getNodeBoxSize(node);
+          let effFactor = factor;
+          if (factor > 1) {
+            effFactor = Math.min(factor, maxW / Math.max(1, w), maxH / Math.max(1, h));
+            if (effFactor <= 1.002) return true;
+          }
+          saveMmHistory();
+          setMmNodes((prev) =>
+            prev.map((n) => {
+              if (n.id !== selectedMmId) return n;
+              const copy: MmNode = {
+                ...n,
+                customW: Math.max(80, Math.round(w * effFactor)),
+                customH: Math.max(36, Math.round(h * effFactor)),
+                fontSize: Math.max(
+                  10,
+                  Math.min(72, Math.round((n.fontSize || 18) * effFactor))
+                ),
+              };
+              clampSingleMmNode(copy, mmDocW, mmDocH);
+              return copy;
+            })
+          );
+          return true;
+        } else if (wholeMmFocused && mmNodes.length > 0) {
+          let minX = Infinity,
+            maxX = -Infinity,
+            minY = Infinity,
+            maxY = -Infinity;
+          mmNodes.forEach((n) => {
+            const { w, h } = getNodeBoxSize(n);
+            minX = Math.min(minX, n.x - w / 2);
+            maxX = Math.max(maxX, n.x + w / 2);
+            minY = Math.min(minY, n.y - h / 2);
+            maxY = Math.max(maxY, n.y + h / 2);
+          });
+          const spanW = Math.max(1, maxX - minX);
+          const spanH = Math.max(1, maxY - minY);
+          const cx = (minX + maxX) / 2;
+          const cy = (minY + maxY) / 2;
+
+          let effFactor = factor;
+          if (factor > 1) {
+            effFactor = Math.min(factor, maxW / spanW, maxH / spanH);
+            if (effFactor <= 1.002) return true;
+          }
+
+          saveMmHistory();
+          setMmNodes((prev) => {
+            const scaled = prev.map((n) => {
+              const { w, h } = getNodeBoxSize(n);
+              return {
+                ...n,
+                x: Math.round(cx + (n.x - cx) * effFactor),
+                y: Math.round(cy + (n.y - cy) * effFactor),
+                customW: Math.max(70, Math.round(w * effFactor)),
+                customH: Math.max(32, Math.round(h * effFactor)),
+                fontSize: Math.max(
+                  10,
+                  Math.min(72, Math.round((n.fontSize || 18) * effFactor))
+                ),
+              };
+            });
+
+            let nMinX = Infinity,
+              nMaxX = -Infinity,
+              nMinY = Infinity,
+              nMaxY = -Infinity;
+            scaled.forEach((n) => {
+              const { w, h } = getNodeBoxSize(n);
+              nMinX = Math.min(nMinX, n.x - w / 2);
+              nMaxX = Math.max(nMaxX, n.x + w / 2);
+              nMinY = Math.min(nMinY, n.y - h / 2);
+              nMaxY = Math.max(nMaxY, n.y + h / 2);
+            });
+            let shiftX = 0,
+              shiftY = 0;
+            if (nMinX < CANVAS_BOUND_PAD) shiftX = Math.ceil(CANVAS_BOUND_PAD - nMinX);
+            else if (nMaxX > mmDocW - CANVAS_BOUND_PAD)
+              shiftX = Math.floor(mmDocW - CANVAS_BOUND_PAD - nMaxX);
+            if (nMinY < CANVAS_BOUND_PAD) shiftY = Math.ceil(CANVAS_BOUND_PAD - nMinY);
+            else if (nMaxY > mmDocH - CANVAS_BOUND_PAD)
+              shiftY = Math.floor(mmDocH - CANVAS_BOUND_PAD - nMaxY);
+
+            return scaled.map((n) => {
+              const copy = { ...n, x: n.x + shiftX, y: n.y + shiftY };
+              clampSingleMmNode(copy, mmDocW, mmDocH);
+              return copy;
+            });
+          });
+          return true;
+        }
+      } else {
+        const slide = slides[currentSlideIdx];
+        if (!slide) return false;
+        const maxW = slideDocW - CANVAS_BOUND_PAD * 2;
+        const maxH = slideDocH - CANVAS_BOUND_PAD * 2;
+
+        if (selectedSlideElId) {
+          const el = slide.elements.find((item) => item.id === selectedSlideElId);
+          if (!el) return false;
+          const eff = getSlideElEffectiveBox(el);
+          let effFactor = factor;
+          if (factor > 1) {
+            effFactor = Math.min(
+              factor,
+              maxW / Math.max(1, eff.w),
+              maxH / Math.max(1, eff.h)
+            );
+            if (effFactor <= 1.002) return true;
+          }
+          saveSlideHistory();
+          const cx = el.x + eff.w / 2;
+          const cy = el.y + eff.h / 2;
+          setSlides((prev) =>
+            prev.map((sl, idx) => {
+              if (idx !== currentSlideIdx) return sl;
+              return {
+                ...sl,
+                elements: sl.elements.map((item) => {
+                  if (item.id !== selectedSlideElId) return item;
+                  const nw = Math.max(24, Math.round(eff.w * effFactor));
+                  const nh = Math.max(24, Math.round(eff.h * effFactor));
+                  const copy: SlideElement = {
+                    ...item,
+                    w: nw,
+                    h: nh,
+                    x: Math.round(cx - nw / 2),
+                    y: Math.round(cy - nh / 2),
+                    fontSize: item.fontSize
+                      ? Math.max(10, Math.min(160, Math.round(item.fontSize * effFactor)))
+                      : 24,
+                    rx: item.rx ? Math.round(item.rx * effFactor) : 0,
+                  };
+                  clampSingleSlideElement(copy, slideDocW, slideDocH);
+                  return copy;
+                }),
+              };
+            })
+          );
+          return true;
+        } else if (wholeSlideFocused && slide.elements.length > 0) {
+          const b = getSlideStructureBounds(slide);
+          let effFactor = factor;
+          if (factor > 1) {
+            effFactor = Math.min(factor, maxW / b.rawW, maxH / b.rawH);
+            if (effFactor <= 1.002) return true;
+          }
+          saveSlideHistory();
+          setSlides((prev) =>
+            prev.map((sl, idx) => {
+              if (idx !== currentSlideIdx) return sl;
+              const scaledEls = sl.elements.map((el) => {
+                const eff = getSlideElEffectiveBox(el);
+                const elCx = el.x + eff.w / 2;
+                const elCy = el.y + eff.h / 2;
+                const nw = Math.max(24, Math.round(eff.w * effFactor));
+                const nh = Math.max(24, Math.round(eff.h * effFactor));
+                return {
+                  ...el,
+                  w: nw,
+                  h: nh,
+                  x: Math.round(b.cx + (elCx - b.cx) * effFactor - nw / 2),
+                  y: Math.round(b.cy + (elCy - b.cy) * effFactor - nh / 2),
+                  fontSize: el.fontSize
+                    ? Math.max(10, Math.min(160, Math.round(el.fontSize * effFactor)))
+                    : 24,
+                  rx: el.rx ? Math.round(el.rx * effFactor) : 0,
+                };
+              });
+
+              const nb = getSlideStructureBounds({ ...sl, elements: scaledEls });
+              let shiftX = 0,
+                shiftY = 0;
+              const rawMinX = nb.x + 12,
+                rawMaxX = nb.x + nb.w - 12;
+              const rawMinY = nb.y + 12,
+                rawMaxY = nb.y + nb.h - 12;
+              if (rawMinX < CANVAS_BOUND_PAD)
+                shiftX = Math.ceil(CANVAS_BOUND_PAD - rawMinX);
+              else if (rawMaxX > slideDocW - CANVAS_BOUND_PAD)
+                shiftX = Math.floor(slideDocW - CANVAS_BOUND_PAD - rawMaxX);
+              if (rawMinY < CANVAS_BOUND_PAD)
+                shiftY = Math.ceil(CANVAS_BOUND_PAD - rawMinY);
+              else if (rawMaxY > slideDocH - CANVAS_BOUND_PAD)
+                shiftY = Math.floor(slideDocH - CANVAS_BOUND_PAD - rawMaxY);
+
+              return {
+                ...sl,
+                elements: scaledEls.map((el) => {
+                  const copy = { ...el, x: el.x + shiftX, y: el.y + shiftY };
+                  clampSingleSlideElement(copy, slideDocW, slideDocH);
+                  return copy;
+                }),
+              };
+            })
+          );
+          return true;
+        }
+      }
+      return false;
+    },
+    [
+      activeTab,
+      mmDocW,
+      mmDocH,
+      selectedMmId,
+      wholeMmFocused,
+      mmNodes,
+      saveMmHistory,
+      slides,
+      currentSlideIdx,
+      slideDocW,
+      slideDocH,
+      selectedSlideElId,
+      wholeSlideFocused,
+      saveSlideHistory,
+    ]
+  );
+
   const getSvgPoint = (svg: SVGSVGElement, clientX: number, clientY: number) => {
     const pt = svg.createSVGPoint();
     pt.x = clientX;
@@ -309,7 +671,13 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     };
   }, [mmCam, mmDocW, mmDocH, currentSlideIdx, slideDocW, slideDocH]);
 
-  const selectedMmNode = mmNodes.find((n) => n.id === selectedMmId) || mmNodes[0];
+  // True nullable selectedMmNode so unfocusing works
+  const selectedMmNode = selectedMmId
+    ? mmNodes.find((n) => n.id === selectedMmId) ?? null
+    : null;
+  const selectedMmBox = selectedMmNode
+    ? getNodeBoxSize(selectedMmNode)
+    : { w: 260, h: 60, lines: [] };
 
   const updateSelectedMmNode = (patch: Partial<MmNode>) => {
     if (!selectedMmNode) return;
@@ -318,6 +686,11 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
       prev.map((n) => {
         if (n.id !== selectedMmNode.id) return n;
         const next = { ...n, ...patch };
+        const { autoW, autoH } = getNodeAutoSize(next);
+        if (patch.text !== undefined) {
+          if (next.customW && next.customW < autoW) next.customW = autoW;
+          if (next.customH && next.customH < autoH) next.customH = autoH;
+        }
         clampSingleMmNode(next, mmDocW, mmDocH);
         return next;
       })
@@ -351,8 +724,8 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     };
     clampSingleMmNode(nextNode, mmDocW, mmDocH);
     setMmNodes((prev) => [...prev, nextNode]);
-    setSelectedMmId(newId);
-  }, [mmNodes, selectedMmId, mmDocW, mmDocH, darkMode, saveMmHistory]);
+    selectMmNode(newId);
+  }, [mmNodes, selectedMmId, mmDocW, mmDocH, darkMode, saveMmHistory, selectMmNode]);
 
   const addSiblingNode = useCallback(() => {
     const cur = mmNodes.find((n) => n.id === selectedMmId);
@@ -360,9 +733,9 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
       addChildNode();
       return;
     }
-    setSelectedMmId(cur.parentId);
+    selectMmNode(cur.parentId);
     addChildNode();
-  }, [mmNodes, selectedMmId, addChildNode]);
+  }, [mmNodes, selectedMmId, addChildNode, selectMmNode]);
 
   const deleteSelectedNode = useCallback(() => {
     if (!selectedMmId) return;
@@ -381,8 +754,8 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
       });
     }
     setMmNodes((prev) => prev.filter((n) => !toRemove.has(n.id)));
-    setSelectedMmId(node.parentId || mmNodes[0]?.id || null);
-  }, [mmNodes, selectedMmId, saveMmHistory]);
+    selectMmNode(node.parentId || mmNodes[0]?.id || null);
+  }, [mmNodes, selectedMmId, saveMmHistory, selectMmNode]);
 
   const applyLayoutMode = (mode: MmLayoutMode) => {
     saveMmHistory();
@@ -416,6 +789,8 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
 
   const centerMindMapStructure = () => {
     if (!mmNodes.length) return;
+    setSelectedMmId(null);
+    setWholeMmFocused(true);
     saveMmHistory();
     let minX = Infinity,
       maxX = -Infinity,
@@ -541,13 +916,15 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     };
     setSlides((prev) => [...prev, newSlide]);
     setCurrentSlideIdx(slides.length);
-    setSelectedSlideElId(null);
+    selectSlideElement(null);
     setActiveTab("slides");
   };
 
+  // Slide Actions
   const activeSlide = slides[currentSlideIdx] || slides[0];
-  const selectedSlideEl =
-    activeSlide?.elements.find((e) => e.id === selectedSlideElId) || null;
+  const selectedSlideEl = selectedSlideElId
+    ? activeSlide?.elements.find((e) => e.id === selectedSlideElId) ?? null
+    : null;
 
   const updateSelectedSlideEl = (patch: Partial<SlideElement>) => {
     if (!selectedSlideEl) return;
@@ -568,6 +945,79 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     );
   };
 
+  const adaptSlideElementsForContrast = (
+    elements: SlideElement[],
+    isLight: boolean
+  ): SlideElement[] => {
+    const lightColors = new Set([
+      "#ffffff",
+      "#f8fafc",
+      "#cbd5e1",
+      "#e2e8f0",
+      "#94a3b8",
+      "#fda4af",
+      "#ffe4e6",
+    ]);
+    const darkColors = new Set(["#0f172a", "#1e293b", "#334155", "#475569"]);
+    return elements.map((el) => {
+      if (el.type === "heading" || el.type === "text") {
+        const cur = (el.stroke || "").toLowerCase();
+        if (isLight && lightColors.has(cur)) {
+          return { ...el, stroke: el.type === "heading" ? "#0f172a" : "#334155" };
+        }
+        if (!isLight && darkColors.has(cur)) {
+          return { ...el, stroke: el.type === "heading" ? "#ffffff" : "#cbd5e1" };
+        }
+      }
+      return el;
+    });
+  };
+
+  const centerSlideStructure = () => {
+    if (!activeSlide || !activeSlide.elements.length) return;
+    setSelectedSlideElId(null);
+    setWholeSlideFocused(true);
+    saveSlideHistory();
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
+    activeSlide.elements.forEach((el) => {
+      minX = Math.min(minX, el.x);
+      maxX = Math.max(maxX, el.x + (el.w || 0));
+      minY = Math.min(minY, el.y);
+      maxY = Math.max(maxY, el.y + (el.h || 0));
+    });
+    const dx = Math.round(slideDocW / 2 - (minX + maxX) / 2);
+    const dy = Math.round(slideDocH / 2 - (minY + maxY) / 2);
+    setSlides((prev) =>
+      prev.map((sl, idx) =>
+        idx === currentSlideIdx
+          ? {
+              ...sl,
+              elements: sl.elements.map((el) => {
+                const copy = { ...el, x: el.x + dx, y: el.y + dy };
+                clampSingleSlideElement(copy, slideDocW, slideDocH);
+                return copy;
+              }),
+            }
+          : sl
+      )
+    );
+  };
+
+  const centerSelectedSlideElement = () => {
+    if (!selectedSlideEl) {
+      centerSlideStructure();
+      return;
+    }
+    saveSlideHistory();
+    updateSelectedSlideEl({
+      x: Math.round((slideDocW - (selectedSlideEl.w || 0)) / 2),
+      y: Math.round((slideDocH - (selectedSlideEl.h || 0)) / 2),
+    });
+  };
+
   const addSlideElement = (type: SlideElementType) => {
     saveSlideHistory();
     const id = "el" + Date.now();
@@ -585,7 +1035,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
         idx === currentSlideIdx ? { ...sl, elements: [...sl.elements, nextEl] } : sl
       )
     );
-    setSelectedSlideElId(id);
+    selectSlideElement(id);
   };
 
   const moveSlideElementZ = (dir: number) => {
@@ -616,8 +1066,8 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
           : sl
       )
     );
-    setSelectedSlideElId(null);
-  }, [selectedSlideElId, currentSlideIdx, saveSlideHistory]);
+    selectSlideElement(null);
+  }, [selectedSlideElId, currentSlideIdx, saveSlideHistory, selectSlideElement]);
 
   const handleResizeSlideProject = (newW: number, newH: number) => {
     const clampedW = Math.max(300, Math.min(8000, newW || 1600));
@@ -704,6 +1154,14 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
         return;
       }
 
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const factor = e.key === "ArrowUp" ? 1.06 : 0.94;
+        if (scaleByArrowKey(factor)) {
+          e.preventDefault();
+          return;
+        }
+      }
+
       if (activeTab === "mindmap") {
         if (e.key === "Tab") {
           e.preventDefault();
@@ -730,6 +1188,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     activeTab,
     undoAction,
     redoAction,
+    scaleByArrowKey,
     addChildNode,
     addSiblingNode,
     deleteSelectedNode,
@@ -742,8 +1201,32 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
     colors: ["#0c1024", "#312e81", "#4f46e5"],
   };
 
+  const mmBounds = getMindMapStructureBounds(mmNodes);
+  const slideBounds = getSlideStructureBounds(activeSlide);
+
+  const stageSvgHtml =
+    buildSlideSvgContent(
+      activeSlide,
+      slideDocW,
+      slideDocH,
+      selectedSlideElId,
+      true,
+      "stage"
+    ) +
+    (wholeSlideFocused && activeSlide?.elements.length
+      ? '<rect class="group-focus-outline" x="' +
+        slideBounds.x +
+        '" y="' +
+        slideBounds.y +
+        '" width="' +
+        slideBounds.w +
+        '" height="' +
+        slideBounds.h +
+        '" rx="16" fill="rgba(56, 189, 248, 0.03)" stroke="#38bdf8" stroke-width="2.5" stroke-dasharray="10 6" pointer-events="none" />'
+      : "");
+
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-background text-foreground select-none">
+    <div className="relative flex flex-1 flex-col overflow-hidden bg-background text-foreground select-none">
       {/* Minimal Slate Studio Sub-Header */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card/60 px-4 py-2 backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-2">
@@ -941,7 +1424,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
       </div>
 
       {/* =================================================================== */}
-      {/* TAB 1: MIND MAP WORKSPACE (Compact Slate Sidebars + Preview Cards)  */}
+      {/* TAB 1: MIND MAP WORKSPACE                                           */}
       {/* =================================================================== */}
       {activeTab === "mindmap" && (
         <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
@@ -950,7 +1433,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Auto-Layout
             </span>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <HorizontalScrollStrip innerClassName="gap-1.5 pb-1" scrollStep={190}>
               {MM_LAYOUT_PREVIEWS.map((item) => (
                 <button
                   key={item.id}
@@ -973,12 +1456,12 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   </span>
                 </button>
               ))}
-            </div>
+            </HorizontalScrollStrip>
 
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Color Theme
             </span>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <HorizontalScrollStrip innerClassName="gap-1.5 pb-1" scrollStep={190}>
               {MM_THEME_PREVIEWS.map((t) => (
                 <button
                   key={t.id}
@@ -1004,7 +1487,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   </span>
                 </button>
               ))}
-            </div>
+            </HorizontalScrollStrip>
 
             <button
               onClick={() => applyLayoutMode(mmLayout)}
@@ -1020,7 +1503,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
               {mmNodes.map((node) => (
                 <button
                   key={node.id}
-                  onClick={() => setSelectedMmId(node.id)}
+                  onClick={() => selectMmNode(node.id)}
                   className={
                     "flex items-center gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors " +
                     (node.id === selectedMmId
@@ -1098,7 +1581,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   onClick={centerMindMapStructure}
                   className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
                 >
-                  <Maximize2 className="h-3 w-3" /> Center
+                  <Maximize2 className="h-3 w-3" /> Center Structure
                 </button>
                 <button
                   onClick={() => setMmCam({ x: 0, y: 0, scale: 1 })}
@@ -1109,17 +1592,38 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
               </div>
             </div>
 
-            <div className="relative flex flex-1 items-center justify-center overflow-hidden p-3">
+            <div
+              className="relative flex flex-1 items-center justify-center overflow-hidden p-3"
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) {
+                  setSelectedMmId(null);
+                  setWholeMmFocused(false);
+                }
+              }}
+            >
               <svg
                 ref={mmSvgRef}
                 viewBox={"0 0 " + mmDocW + " " + mmDocH}
                 className="h-full w-full cursor-grab rounded-xl border border-border shadow-sm active:cursor-grabbing"
                 onPointerDown={(e) => {
-                  if (
-                    e.target === mmSvgRef.current ||
-                    (e.target as Element).id === "mmBgRect"
-                  ) {
-                    const pt = getSvgPoint(mmSvgRef.current!, e.clientX, e.clientY);
+                  const onNode = (e.target as Element).closest(".mm-node");
+                  if (!onNode && mmSvgRef.current) {
+                    const pt = getSvgPoint(mmSvgRef.current, e.clientX, e.clientY);
+                    const worldX = (pt.x - mmCam.x) / mmCam.scale;
+                    const worldY = (pt.y - mmCam.y) / mmCam.scale;
+                    const insideBounds =
+                      worldX >= mmBounds.x &&
+                      worldX <= mmBounds.x + mmBounds.w &&
+                      worldY >= mmBounds.y &&
+                      worldY <= mmBounds.y + mmBounds.h;
+
+                    if (insideBounds && !wholeMmFocused) {
+                      setSelectedMmId(null);
+                      setWholeMmFocused(true);
+                    } else {
+                      setSelectedMmId(null);
+                      setWholeMmFocused(false);
+                    }
                     dragRef.current = {
                       type: "mm-pan",
                       startX: pt.x - mmCam.x,
@@ -1166,6 +1670,21 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     ")"
                   }
                 >
+                  {wholeMmFocused && mmNodes.length > 0 && (
+                    <rect
+                      className="group-focus-outline"
+                      x={mmBounds.x}
+                      y={mmBounds.y}
+                      width={mmBounds.w}
+                      height={mmBounds.h}
+                      rx={16}
+                      fill="rgba(56, 189, 248, 0.03)"
+                      stroke="#38bdf8"
+                      strokeWidth={2.5}
+                      strokeDasharray="10 6"
+                      pointerEvents="none"
+                    />
+                  )}
                   <g
                     dangerouslySetInnerHTML={{
                       __html:
@@ -1178,14 +1697,15 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     const { w, h } = getNodeBoxSize(node);
                     const isSel = node.id === selectedMmId;
                     const bw = node.borderWidth || 0;
+                    const glowCol = bw > 0 ? node.borderColor || node.color : node.color;
                     return (
                       <g
                         key={node.id}
                         transform={"translate(" + node.x + ", " + node.y + ")"}
-                        className="cursor-pointer"
+                        className="mm-node cursor-pointer"
                         onPointerDown={(e) => {
                           e.stopPropagation();
-                          setSelectedMmId(node.id);
+                          selectMmNode(node.id);
                           if (!mmSvgRef.current) return;
                           const pt = getSvgPoint(
                             mmSvgRef.current,
@@ -1208,6 +1728,11 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                             fill={node.color}
                             stroke={bw > 0 ? node.borderColor || "#ffffff" : "none"}
                             strokeWidth={bw}
+                            style={
+                              node.glow
+                                ? { filter: "drop-shadow(0 0 12px " + glowCol + ")" }
+                                : undefined
+                            }
                           />
                         ) : (
                           <rect
@@ -1219,6 +1744,11 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                             fill={node.color}
                             stroke={bw > 0 ? node.borderColor || "#ffffff" : "none"}
                             strokeWidth={bw}
+                            style={
+                              node.glow
+                                ? { filter: "drop-shadow(0 0 12px " + glowCol + ")" }
+                                : undefined
+                            }
                           />
                         )}
                         {isSel && (
@@ -1230,21 +1760,23 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                             rx={12}
                             fill="none"
                             stroke="#38bdf8"
-                            strokeWidth="2"
-                            strokeDasharray="5 4"
+                            strokeWidth="2.5"
+                            strokeDasharray="6 4"
                           />
                         )}
                         <g
                           dangerouslySetInnerHTML={{
-                            __html: buildMindMapViewportInnerSvg(
-                              [node],
-                              mmLayout,
-                              mmDocW
-                            )
-                              .replace(/^<g>.*?</g><g>/, "")
-                              .replace(/</g>$/, "")
-                              .replace(/^<g[^>]*><(?:rect|ellipse)[^>]*/>/, "")
-                              .replace(/</g>$/, ""),
+                            __html: renderSvgMultilineText(
+                              node.text,
+                              0,
+                              0,
+                              node.fontSize || 18,
+                              node.textColor || "#ffffff",
+                              "middle",
+                              true,
+                              node.parentId === null ? "700" : "500",
+                              node.fontFamily || "'Inter', system-ui, sans-serif"
+                            ),
                           }}
                         />
                       </g>
@@ -1255,113 +1787,156 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
             </div>
           </div>
 
-          {/* Compact Right Inspector (w-[248px] on Desktop) */}
-          <div className="flex shrink-0 flex-col gap-3 border-t border-border bg-card/30 p-3 lg:w-[248px] lg:overflow-y-auto lg:border-t-0 lg:border-l">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Canvas Background (30 Presets)
-            </span>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {Object.entries(SVG_BG_PRESETS).map(([id, cfg], idx) => (
+          {/* Compact Right Inspector (w-[258px] on Desktop) */}
+          <div className="flex shrink-0 flex-col gap-3 border-t border-border bg-card/30 p-3 lg:w-[258px] lg:overflow-y-auto lg:border-t-0 lg:border-l">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Background
+              </span>
+              <div className="flex rounded-md bg-muted/70 p-0.5 text-[10px] font-semibold">
                 <button
-                  key={id}
-                  onClick={() => {
-                    saveMmHistory();
-                    setMmBgConfig({
-                      mode: "design",
-                      presetId: id,
-                      colors: [...cfg.colors] as [string, string, string],
-                    });
-                  }}
+                  onClick={() => setMmBgConfig((c) => ({ ...c, mode: "design" }))}
                   className={
-                    "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border transition-all " +
-                    (mmBgConfig.presetId === id
-                      ? "border-primary ring-1 ring-primary"
-                      : "border-border opacity-80 hover:opacity-100")
+                    "rounded px-2 py-0.5 " +
+                    (mmBgConfig.mode === "design"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground")
                   }
                 >
-                  <svg
-                    viewBox="0 0 1600 900"
-                    preserveAspectRatio="none"
-                    className="h-full w-full"
-                    dangerouslySetInnerHTML={{
-                      __html: cfg.render(
-                        cfg.colors[0],
-                        cfg.colors[1],
-                        cfg.colors[2],
-                        "mm_th_" + idx
-                      ),
-                    }}
-                  />
-                  <span className="absolute inset-x-0 bottom-0 truncate bg-black/75 px-1 py-0.5 text-[8.5px] font-medium text-white">
-                    {cfg.name}
-                  </span>
+                  Design
                 </button>
-              ))}
-            </div>
-
-            <div className="grid grid-cols-3 gap-1.5">
-              <div>
-                <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                  Base BG
-                </label>
-                <input
-                  type="color"
-                  value={mmBgConfig.colors[0]}
-                  onChange={(e) =>
-                    setMmBgConfig((c) => ({
-                      ...c,
-                      mode: "design",
-                      colors: [e.target.value, c.colors[1], c.colors[2]],
-                    }))
+                <button
+                  onClick={() => setMmBgConfig((c) => ({ ...c, mode: "solid" }))}
+                  className={
+                    "rounded px-2 py-0.5 " +
+                    (mmBgConfig.mode === "solid"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground")
                   }
-                  className="h-7 w-full cursor-pointer rounded border border-border bg-background"
-                />
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                  Shape 1
-                </label>
-                <input
-                  type="color"
-                  value={mmBgConfig.colors[1]}
-                  onChange={(e) =>
-                    setMmBgConfig((c) => ({
-                      ...c,
-                      mode: "design",
-                      colors: [c.colors[0], e.target.value, c.colors[2]],
-                    }))
-                  }
-                  className="h-7 w-full cursor-pointer rounded border border-border bg-background"
-                />
-              </div>
-              <div>
-                <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                  Shape 2
-                </label>
-                <input
-                  type="color"
-                  value={mmBgConfig.colors[2]}
-                  onChange={(e) =>
-                    setMmBgConfig((c) => ({
-                      ...c,
-                      mode: "design",
-                      colors: [c.colors[0], c.colors[1], e.target.value],
-                    }))
-                  }
-                  className="h-7 w-full cursor-pointer rounded border border-border bg-background"
-                />
+                >
+                  Solid
+                </button>
               </div>
             </div>
 
-            {selectedMmNode && (
+            {mmBgConfig.mode === "design" ? (
               <>
-                <hr className="border-border" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Selected Node
-                </span>
+                <HorizontalScrollStrip innerClassName="gap-1.5 pb-1" scrollStep={190}>
+                  {Object.entries(SVG_BG_PRESETS).map(([id, cfg], idx) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        saveMmHistory();
+                        setMmBgConfig({
+                          mode: "design",
+                          presetId: id,
+                          colors: [...cfg.colors] as [string, string, string],
+                        });
+                      }}
+                      className={
+                        "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border transition-all " +
+                        (mmBgConfig.presetId === id
+                          ? "border-primary ring-1 ring-primary"
+                          : "border-border opacity-80 hover:opacity-100")
+                      }
+                    >
+                      <svg
+                        viewBox="0 0 1600 900"
+                        preserveAspectRatio="none"
+                        className="h-full w-full"
+                        dangerouslySetInnerHTML={{
+                          __html: cfg.render(
+                            cfg.colors[0],
+                            cfg.colors[1],
+                            cfg.colors[2],
+                            "mm_th_" + idx
+                          ),
+                        }}
+                      />
+                      <span className="absolute inset-x-0 bottom-0 truncate bg-black/75 px-1 py-0.5 text-[8.5px] font-medium text-white">
+                        {cfg.name}
+                      </span>
+                    </button>
+                  ))}
+                </HorizontalScrollStrip>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                      Base BG
+                    </label>
+                    <input
+                      type="color"
+                      value={mmBgConfig.colors[0]}
+                      onChange={(e) =>
+                        setMmBgConfig((c) => ({
+                          ...c,
+                          mode: "design",
+                          colors: [e.target.value, c.colors[1], c.colors[2]],
+                        }))
+                      }
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                      Shape 1
+                    </label>
+                    <input
+                      type="color"
+                      value={mmBgConfig.colors[1]}
+                      onChange={(e) =>
+                        setMmBgConfig((c) => ({
+                          ...c,
+                          mode: "design",
+                          colors: [c.colors[0], e.target.value, c.colors[2]],
+                        }))
+                      }
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                      Shape 2
+                    </label>
+                    <input
+                      type="color"
+                      value={mmBgConfig.colors[2]}
+                      onChange={(e) =>
+                        setMmBgConfig((c) => ({
+                          ...c,
+                          mode: "design",
+                          colors: [c.colors[0], c.colors[1], e.target.value],
+                        }))
+                      }
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="mb-1 block text-[11px] text-muted-foreground">
+                  Solid Canvas Color
+                </label>
+                <input
+                  type="color"
+                  value={mmBgColor}
+                  onChange={(e) => setMmBgColor(e.target.value)}
+                  className="h-8 w-full cursor-pointer rounded border border-border bg-background"
+                />
+              </div>
+            )}
+
+            <hr className="border-border" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Selected Node Properties
+            </span>
+
+            {selectedMmNode ? (
+              <>
                 <div>
                   <label className="mb-1 block text-[11px] text-muted-foreground">
-                    Text (**bold**, *italic*)
+                    Node Text (**bold**, *italic*)
                   </label>
                   <textarea
                     rows={2}
@@ -1377,7 +1952,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   <select
                     value={selectedMmNode.fontFamily || OPEN_SOURCE_FONTS[0].value}
                     onChange={(e) => updateSelectedMmNode({ fontFamily: e.target.value })}
-                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                    className="h-7 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
                   >
                     {OPEN_SOURCE_FONTS.map((f) => (
                       <option key={f.value} value={f.value}>
@@ -1389,7 +1964,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
-                      Fill
+                      Fill Color
                     </label>
                     <input
                       type="color"
@@ -1400,7 +1975,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
-                      Text
+                      Text Color
                     </label>
                     <input
                       type="color"
@@ -1413,44 +1988,125 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
-                      Shape
+                      Width (px)
+                    </label>
+                    <NumberStepper
+                      value={selectedMmBox.w}
+                      min={80}
+                      max={1200}
+                      step={10}
+                      onChange={(val) => updateSelectedMmNode({ customW: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      Height (px)
+                    </label>
+                    <NumberStepper
+                      value={selectedMmBox.h}
+                      min={36}
+                      max={800}
+                      step={10}
+                      onChange={(val) => updateSelectedMmNode({ customH: val })}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      Node Shape
                     </label>
                     <select
                       value={selectedMmNode.shape}
                       onChange={(e) =>
                         updateSelectedMmNode({ shape: e.target.value as MmNodeShape })
                       }
-                      className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                      className="h-7 w-full rounded-md border border-border bg-background px-2 text-xs"
                     >
-                      <option value="pill">Pill</option>
-                      <option value="rect">Card</option>
-                      <option value="ellipse">Oval</option>
+                      <option value="pill">Rounded Pill</option>
+                      <option value="rect">Sharp Card</option>
+                      <option value="ellipse">Oval / Badge</option>
                     </select>
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
                       Font Size
                     </label>
-                    <input
-                      type="number"
+                    <NumberStepper
+                      value={selectedMmNode.fontSize || 18}
                       min={12}
                       max={64}
-                      value={selectedMmNode.fontSize}
-                      onChange={(e) =>
-                        updateSelectedMmNode({ fontSize: Number(e.target.value) || 18 })
-                      }
-                      className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
+                      step={1}
+                      onChange={(val) => updateSelectedMmNode({ fontSize: val })}
                     />
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      Border Size
+                    </label>
+                    <NumberStepper
+                      value={selectedMmNode.borderWidth || 0}
+                      min={0}
+                      max={20}
+                      step={1}
+                      onChange={(val) => updateSelectedMmNode({ borderWidth: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      Border Color
+                    </label>
+                    <input
+                      type="color"
+                      value={selectedMmNode.borderColor || "#ffffff"}
+                      onChange={(e) =>
+                        updateSelectedMmNode({ borderColor: e.target.value })
+                      }
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedMmNode.glow)}
+                    onChange={(e) => updateSelectedMmNode({ glow: e.target.checked })}
+                  />
+                  Enable Glow Effect
+                </label>
+                <div>
+                  <span className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Quick Color Presets
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {QUICK_NODE_COLORS.map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        onClick={() => updateSelectedMmNode({ color: hex })}
+                        className="h-5 w-5 rounded-md border border-border transition-transform hover:scale-110"
+                        style={{ backgroundColor: hex }}
+                        title={hex}
+                      />
+                    ))}
+                  </div>
+                </div>
               </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {wholeMmFocused
+                  ? "Whole Mind Map focused — use ↑ / ↓ arrow keys to scale all nodes together."
+                  : "Click any node to edit its text, size, colors, border, and glow."}
+              </p>
             )}
           </div>
         </div>
       )}
 
       {/* =================================================================== */}
-      {/* TAB 2: SLIDE MAKER WORKSPACE (Compact Slate Sidebars + Previews)    */}
+      {/* TAB 2: SLIDE MAKER WORKSPACE                                        */}
       {/* =================================================================== */}
       {activeTab === "slides" && (
         <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
@@ -1459,7 +2115,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Add Slide Preset
             </span>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
+            <HorizontalScrollStrip innerClassName="gap-1.5 pb-1" scrollStep={190}>
               {SLIDE_PRESET_PREVIEWS.map((item) => (
                 <button
                   key={item.id}
@@ -1468,7 +2124,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     const created = createSlideFromTemplate(item.id);
                     setSlides((prev) => [...prev, created]);
                     setCurrentSlideIdx(slides.length);
-                    setSelectedSlideElId(created.elements[0]?.id || null);
+                    selectSlideElement(created.elements[0]?.id || null);
                   }}
                   className="relative h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border border-border opacity-85 transition-all hover:border-primary hover:opacity-100"
                 >
@@ -1483,7 +2139,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   </span>
                 </button>
               ))}
-            </div>
+            </HorizontalScrollStrip>
 
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Slides ({slides.length})
@@ -1494,7 +2150,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   key={s.id}
                   onClick={() => {
                     setCurrentSlideIdx(idx);
-                    setSelectedSlideElId(s.elements[0]?.id || null);
+                    selectSlideElement(s.elements[0]?.id || null);
                   }}
                   className={
                     "cursor-pointer rounded-lg border p-1.5 transition-all " +
@@ -1600,6 +2256,20 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   <Redo2 className="h-3.5 w-3.5" />
                 </button>
                 <button
+                  onClick={centerSlideStructure}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                  title="Center All Slide Items"
+                >
+                  <Maximize2 className="h-3 w-3" /> Center All
+                </button>
+                <button
+                  onClick={centerSelectedSlideElement}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                  title="Center Selected Item"
+                >
+                  <AlignCenter className="h-3 w-3" /> Center Item
+                </button>
+                <button
                   onClick={() => moveSlideElementZ(1)}
                   className="inline-flex h-7 items-center gap-0.5 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
                   title="Bring Forward"
@@ -1623,7 +2293,15 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
               </div>
             </div>
 
-            <div className="flex flex-1 items-center justify-center overflow-hidden p-4">
+            <div
+              className="flex flex-1 items-center justify-center overflow-hidden p-4"
+              onPointerDown={(e) => {
+                if (e.target === e.currentTarget) {
+                  setSelectedSlideElId(null);
+                  setWholeSlideFocused(false);
+                }
+              }}
+            >
               <div
                 className="w-full max-w-[920px] overflow-hidden rounded-xl border border-border shadow-xl"
                 style={{ aspectRatio: slideDocW + " / " + slideDocH }}
@@ -1637,7 +2315,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     if (g && slideSvgRef.current) {
                       const id = g.getAttribute("data-id");
                       if (!id) return;
-                      setSelectedSlideElId(id);
+                      selectSlideElement(id);
                       const el = activeSlide.elements.find((item) => item.id === id);
                       if (!el) return;
                       const pt = getSvgPoint(
@@ -1652,90 +2330,329 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                         offsetX: pt.x - el.x,
                         offsetY: pt.y - el.y,
                       };
-                    } else {
-                      setSelectedSlideElId(null);
+                    } else if (slideSvgRef.current) {
+                      const pt = getSvgPoint(
+                        slideSvgRef.current,
+                        e.clientX,
+                        e.clientY
+                      );
+                      const insideBounds =
+                        pt.x >= slideBounds.x &&
+                        pt.x <= slideBounds.x + slideBounds.w &&
+                        pt.y >= slideBounds.y &&
+                        pt.y <= slideBounds.y + slideBounds.h;
+
+                      if (
+                        insideBounds &&
+                        !wholeSlideFocused &&
+                        activeSlide.elements.length > 0
+                      ) {
+                        setSelectedSlideElId(null);
+                        setWholeSlideFocused(true);
+                      } else {
+                        setSelectedSlideElId(null);
+                        setWholeSlideFocused(false);
+                      }
                     }
                   }}
-                  dangerouslySetInnerHTML={{
-                    __html: buildSlideSvgContent(
-                      activeSlide,
-                      slideDocW,
-                      slideDocH,
-                      selectedSlideElId,
-                      true,
-                      "stage"
-                    ),
-                  }}
+                  dangerouslySetInnerHTML={{ __html: stageSvgHtml }}
                 />
               </div>
             </div>
           </div>
 
-          {/* Compact Right Slide Inspector (w-[248px] on Desktop) */}
-          <div className="flex shrink-0 flex-col gap-3 border-t border-border bg-card/30 p-3 lg:w-[248px] lg:overflow-y-auto lg:border-t-0 lg:border-l">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Slide Background (30 Presets)
-            </span>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {Object.entries(SVG_BG_PRESETS).map(([id, cfg], idx) => (
+          {/* Compact Right Slide Inspector (w-[258px] on Desktop) */}
+          <div className="flex shrink-0 flex-col gap-3 border-t border-border bg-card/30 p-3 lg:w-[258px] lg:overflow-y-auto lg:border-t-0 lg:border-l">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Background
+              </span>
+              <div className="flex rounded-md bg-muted/70 p-0.5 text-[10px] font-semibold">
                 <button
-                  key={id}
-                  onClick={() => {
-                    saveSlideHistory();
+                  onClick={() =>
                     setSlides((prev) =>
                       prev.map((sl, i) =>
                         i === currentSlideIdx
-                          ? {
-                              ...sl,
-                              bgConfig: {
-                                mode: "design",
-                                presetId: id,
-                                colors: [...cfg.colors] as [string, string, string],
-                              },
-                            }
+                          ? { ...sl, bgConfig: { ...activeSlideBgCfg, mode: "design" } }
                           : sl
                       )
-                    );
-                  }}
+                    )
+                  }
                   className={
-                    "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border transition-all " +
-                    (activeSlideBgCfg.presetId === id
-                      ? "border-primary ring-1 ring-primary"
-                      : "border-border opacity-80 hover:opacity-100")
+                    "rounded px-2 py-0.5 " +
+                    (activeSlideBgCfg.mode === "design"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground")
                   }
                 >
-                  <svg
-                    viewBox="0 0 1600 900"
-                    preserveAspectRatio="none"
-                    className="h-full w-full"
-                    dangerouslySetInnerHTML={{
-                      __html: cfg.render(
-                        cfg.colors[0],
-                        cfg.colors[1],
-                        cfg.colors[2],
-                        "sl_th_" + idx
-                      ),
-                    }}
-                  />
-                  <span className="absolute inset-x-0 bottom-0 truncate bg-black/75 px-1 py-0.5 text-[8.5px] font-medium text-white">
-                    {cfg.name}
-                  </span>
+                  Design
                 </button>
-              ))}
+                <button
+                  onClick={() =>
+                    setSlides((prev) =>
+                      prev.map((sl, i) =>
+                        i === currentSlideIdx
+                          ? { ...sl, bgConfig: { ...activeSlideBgCfg, mode: "solid" } }
+                          : sl
+                      )
+                    )
+                  }
+                  className={
+                    "rounded px-2 py-0.5 " +
+                    (activeSlideBgCfg.mode === "solid"
+                      ? "bg-background text-foreground shadow-2xs"
+                      : "text-muted-foreground")
+                  }
+                >
+                  Solid / Grad
+                </button>
+              </div>
             </div>
+
+            {activeSlideBgCfg.mode === "design" ? (
+              <>
+                <HorizontalScrollStrip innerClassName="gap-1.5 pb-1" scrollStep={190}>
+                  {Object.entries(SVG_BG_PRESETS).map(([id, cfg], idx) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        saveSlideHistory();
+                        const isLight = isHexColorLight(cfg.colors[0]);
+                        setSlides((prev) =>
+                          prev.map((sl, i) =>
+                            i === currentSlideIdx
+                              ? {
+                                  ...sl,
+                                  elements: adaptSlideElementsForContrast(
+                                    sl.elements,
+                                    isLight ),
+                                  bgConfig: {
+                                    mode: "design",
+                                    presetId: id,
+                                    colors: [...cfg.colors] as [string, string, string],
+                                  },
+                                }
+                              : sl
+                          )
+                        );
+                      }}
+                      className={
+                        "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border transition-all " +
+                        (activeSlideBgCfg.presetId === id
+                          ? "border-primary ring-1 ring-primary"
+                          : "border-border opacity-80 hover:opacity-100")
+                      }
+                    >
+                      <svg
+                        viewBox="0 0 1600 900"
+                        preserveAspectRatio="none"
+                        className="h-full w-full"
+                        dangerouslySetInnerHTML={{
+                          __html: cfg.render(
+                            cfg.colors[0],
+                            cfg.colors[1],
+                            cfg.colors[2],
+                            "sl_th_" + idx
+                          ),
+                        }}
+                      />
+                      <span className="absolute inset-x-0 bottom-0 truncate bg-black/75 px-1 py-0.5 text-[8.5px] font-medium text-white">
+                        {cfg.name}
+                      </span>
+                    </button>
+                  ))}
+                </HorizontalScrollStrip>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                      Base BG
+                    </label>
+                    <input
+                      type="color"
+                      value={activeSlideBgCfg.colors[0]}
+                      onChange={(e) => {
+                        const hex = e.target.value;
+                        const isLight = isHexColorLight(hex);
+                        setSlides((prev) =>
+                          prev.map((sl, i) =>
+                            i === currentSlideIdx
+                              ? {
+                                  ...sl,
+                                  elements: adaptSlideElementsForContrast(
+                                    sl.elements,
+                                    isLight
+                                  ),
+                                  bgConfig: {
+                                    ...activeSlideBgCfg,
+                                    mode: "design",
+                                    colors: [
+                                      hex,
+                                      activeSlideBgCfg.colors[1],
+                                      activeSlideBgCfg.colors[2],
+                                    ],
+                                  },
+                                }
+                              : sl
+                          )
+                        );
+                      }}
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                      Shape 1
+                    </label>
+                    <input
+                      type="color"
+                      value={activeSlideBgCfg.colors[1]}
+                      onChange={(e) => {
+                        const hex = e.target.value;
+                        setSlides((prev) =>
+                          prev.map((sl, i) =>
+                            i === currentSlideIdx
+                              ? {
+                                  ...sl,
+                                  bgConfig: {
+                                    ...activeSlideBgCfg,
+                                    mode: "design",
+                                    colors: [
+                                      activeSlideBgCfg.colors[0],
+                                      hex,
+                                      activeSlideBgCfg.colors[2],
+                                    ],
+                                  },
+                                }
+                              : sl
+                          )
+                        );
+                      }}
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                      Shape 2
+                    </label>
+                    <input
+                      type="color"
+                      value={activeSlideBgCfg.colors[2]}
+                      onChange={(e) => {
+                        const hex = e.target.value;
+                        setSlides((prev) =>
+                          prev.map((sl, i) =>
+                            i === currentSlideIdx
+                              ? {
+                                  ...sl,
+                                  bgConfig: {
+                                    ...activeSlideBgCfg,
+                                    mode: "design",
+                                    colors: [
+                                      activeSlideBgCfg.colors[0],
+                                      activeSlideBgCfg.colors[1],
+                                      hex,
+                                    ],
+                                  },
+                                }
+                              : sl
+                          )
+                        );
+                      }}
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <div>
+                  <label className="mb-1 block text-[11px] text-muted-foreground">
+                    Solid Slide Color
+                  </label>
+                  <input
+                    type="color"
+                    value={activeSlide.bg.startsWith("#") ? activeSlide.bg : "#0f172a"}
+                    onChange={(e) => {
+                      const hex = e.target.value;
+                      const isLight = isHexColorLight(hex);
+                      setSlides((prev) =>
+                        prev.map((sl, i) =>
+                          i === currentSlideIdx
+                            ? {
+                                ...sl,
+                                bg: hex,
+                                elements: adaptSlideElementsForContrast(
+                                  sl.elements,
+                                  isLight
+                                ),
+                                bgConfig: { ...activeSlideBgCfg, mode: "solid" },
+                              }
+                            : sl
+                        )
+                      );
+                    }}
+                    className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-muted-foreground">
+                    Classic Gradients
+                  </label>
+                  <select
+                    value={activeSlide.bg}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const isLight =
+                        val === "#ffffff" || val === "#f8fafc" || val === "grad-arctic";
+                      saveSlideHistory();
+                      setSlides((prev) =>
+                        prev.map((sl, i) =>
+                          i === currentSlideIdx
+                            ? {
+                                ...sl,
+                                bg: val,
+                                elements: adaptSlideElementsForContrast(
+                                  sl.elements,
+                                  isLight
+                                ),
+                                bgConfig: { ...activeSlideBgCfg, mode: "solid" },
+                              }
+                            : sl
+                        )
+                      );
+                    }}
+                    className="h-7 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                  >
+                    <option value="#0f172a">Midnight Slate (Dark)</option>
+                    <option value="grad-indigo">Royal Indigo Gradient</option>
+                    <option value="grad-emerald">Emerald Cyber Gradient</option>
+                    <option value="grad-sunset">Sunset Coral &amp; Violet</option>
+                    <option value="grad-ocean">Deep Pacific Cyan</option>
+                    <option value="grad-crimson">Velvet Crimson Night</option>
+                    <option value="grad-gold">Obsidian &amp; Luxury Gold</option>
+                    <option value="grad-aurora">Northern Aurora Mesh</option>
+                    <option value="grad-arctic">Arctic Frost (Light)</option>
+                    <option value="#f8fafc">Alabaster Paper (Light)</option>
+                    <option value="#ffffff">Clean Daylight (White)</option>
+                    <option value="#18181b">Carbon Matte</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <hr className="border-border" />
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Selected Element Inspector
+            </span>
 
             {selectedSlideEl ? (
               <>
-                <hr className="border-border" />
-                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Selected Element
-                </span>
                 <div>
                   <label className="mb-1 block text-[11px] text-muted-foreground">
                     Text (# H1, **bold**, *italic*)
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     value={selectedSlideEl.text}
                     onChange={(e) => updateSelectedSlideEl({ text: e.target.value })}
                     className="w-full rounded-md border border-border bg-background p-2 text-xs text-foreground focus:outline-none"
@@ -1748,7 +2665,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   <select
                     value={selectedSlideEl.fontFamily || OPEN_SOURCE_FONTS[0].value}
                     onChange={(e) => updateSelectedSlideEl({ fontFamily: e.target.value })}
-                    className="h-8 w-full rounded-md border border-border bg-background px-2 text-xs"
+                    className="h-7 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground"
                   >
                     {OPEN_SOURCE_FONTS.map((f) => (
                       <option key={f.value} value={f.value}>
@@ -1760,7 +2677,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
-                      Fill
+                      Fill / Color
                     </label>
                     <input
                       type="color"
@@ -1786,28 +2703,24 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     <label className="mb-1 block text-[11px] text-muted-foreground">
                       Width (px)
                     </label>
-                    <input
-                      type="number"
-                      step={10}
+                    <NumberStepper
                       value={selectedSlideEl.w}
-                      onChange={(e) =>
-                        updateSelectedSlideEl({ w: Number(e.target.value) || 100 })
-                      }
-                      className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
+                      min={24}
+                      max={2000}
+                      step={10}
+                      onChange={(val) => updateSelectedSlideEl({ w: val })}
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
                       Height (px)
                     </label>
-                    <input
-                      type="number"
-                      step={10}
+                    <NumberStepper
                       value={selectedSlideEl.h}
-                      onChange={(e) =>
-                        updateSelectedSlideEl({ h: Number(e.target.value) || 60 })
-                      }
-                      className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
+                      min={24}
+                      max={2000}
+                      step={10}
+                      onChange={(val) => updateSelectedSlideEl({ h: val })}
                     />
                   </div>
                 </div>
@@ -1816,40 +2729,160 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     <label className="mb-1 block text-[11px] text-muted-foreground">
                       Font Size
                     </label>
-                    <input
-                      type="number"
+                    <NumberStepper
+                      value={selectedSlideEl.fontSize}
                       min={12}
                       max={140}
-                      value={selectedSlideEl.fontSize}
-                      onChange={(e) =>
-                        updateSelectedSlideEl({ fontSize: Number(e.target.value) || 24 })
-                      }
-                      className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
+                      step={2}
+                      onChange={(val) => updateSelectedSlideEl({ fontSize: val })}
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-[11px] text-muted-foreground">
-                      Radius
+                      Corner Radius
                     </label>
-                    <input
-                      type="number"
+                    <NumberStepper
+                      value={selectedSlideEl.rx ?? 16}
                       min={0}
                       max={200}
-                      value={selectedSlideEl.rx ?? 16}
-                      onChange={(e) =>
-                        updateSelectedSlideEl({ rx: Number(e.target.value) || 0 })
-                      }
-                      className="h-8 w-full rounded-md border border-border bg-background px-2 font-mono text-xs"
+                      step={2}
+                      onChange={(val) => updateSelectedSlideEl({ rx: val })}
                     />
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      Border Size
+                    </label>
+                    <NumberStepper
+                      value={selectedSlideEl.borderWidth || 0}
+                      min={0}
+                      max={30}
+                      step={1}
+                      onChange={(val) => updateSelectedSlideEl({ borderWidth: val })}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[11px] text-muted-foreground">
+                      Border Color
+                    </label>
+                    <input
+                      type="color"
+                      value={selectedSlideEl.borderColor || "#ffffff"}
+                      onChange={(e) =>
+                        updateSelectedSlideEl({ borderColor: e.target.value })
+                      }
+                      className="h-7 w-full cursor-pointer rounded border border-border bg-background"
+                    />
+                  </div>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedSlideEl.glow)}
+                    onChange={(e) => updateSelectedSlideEl({ glow: e.target.checked })}
+                  />
+                  Enable Glow Effect
+                </label>
               </>
             ) : (
-              <p className="mt-2 text-xs text-muted-foreground">
-                Click any element on the slide stage to customize its text, font, colors, and size.
+              <p className="text-xs text-muted-foreground">
+                {wholeSlideFocused
+                  ? "Whole Slide focused — use ↑ / ↓ arrow keys to scale all items together."
+                  : "Click any element on the slide stage to customize its text, font, colors, border, and size."}
               </p>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Floating Scale Hint Pill (Matches Visualize Studio) */}
+      {(selectedMmId || wholeMmFocused || selectedSlideElId || wholeSlideFocused) && (
+        <div className="pointer-events-none fixed bottom-3 left-1/2 z-40 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-sky-500/40 bg-card/95 px-3.5 py-1 text-[11px] font-medium text-foreground shadow-lg backdrop-blur-md md:inline-flex">
+          {activeTab === "mindmap" ? (
+            selectedMmId ? (
+              <>
+                <span>Node Selected</span>
+                <span className="text-muted-foreground">&bull;</span>
+                <span>
+                  Press{" "}
+                  <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                    &uarr;
+                  </kbd>{" "}
+                  <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                    &darr;
+                  </kbd>{" "}
+                  arrows to resize
+                </span>
+                <span className="text-muted-foreground">&bull;</span>
+                <span className="text-muted-foreground">
+                  Click empty space to focus whole map
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="font-semibold text-sky-500">
+                  Whole Mind Map Focused
+                </span>
+                <span className="text-muted-foreground">&bull;</span>
+                <span>
+                  Press{" "}
+                  <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                    &uarr;
+                  </kbd>{" "}
+                  <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                    &darr;
+                  </kbd>{" "}
+                  arrows to scale all
+                </span>
+                <span className="text-muted-foreground">&bull;</span>
+                <span className="text-muted-foreground">
+                  Click outside outline to clear
+                </span>
+              </>
+            )
+          ) : selectedSlideElId ? (
+            <>
+              <span>Component Selected</span>
+              <span className="text-muted-foreground">&bull;</span>
+              <span>
+                Press{" "}
+                <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                  &uarr;
+                </kbd>{" "}
+                <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                  &darr;
+                </kbd>{" "}
+                arrows to resize
+              </span>
+              <span className="text-muted-foreground">&bull;</span>
+              <span className="text-muted-foreground">
+                Click inside slide to focus all
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-sky-500">
+                Whole Slide Focused
+              </span>
+              <span className="text-muted-foreground">&bull;</span>
+              <span>
+                Press{" "}
+                <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                  &uarr;
+                </kbd>{" "}
+                <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px] text-sky-500">
+                  &darr;
+                </kbd>{" "}
+                arrows to scale all
+              </span>
+              <span className="text-muted-foreground">&bull;</span>
+              <span className="text-muted-foreground">
+                Click outside outline to clear
+              </span>
+            </>
+          )}
         </div>
       )}
 
@@ -1883,7 +2916,9 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
               {currentSlideIdx + 1} / {slides.length}
             </span>
             <button
-              onClick={() => setCurrentSlideIdx((i) => Math.min(slides.length - 1, i + 1))}
+              onClick={() =>
+                setCurrentSlideIdx((i) => Math.min(slides.length - 1, i + 1))
+              }
               className="rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium hover:bg-accent"
             >
               Next

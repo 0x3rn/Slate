@@ -580,7 +580,7 @@ export function ImageStudio({ onInsertMarkdown }: ImageStudioProps) {
                   : "text-muted-foreground hover:text-foreground")
               }
             >
-              <Sparkles className="h-3.5 w-3.5 text-emerald-500" />
+              <ImageIcon className="h-3.5 w-3.5 text-indigo-400" />
               Picture to SVG
             </button>
             <button

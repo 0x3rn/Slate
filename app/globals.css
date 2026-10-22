@@ -273,37 +273,32 @@ body {
   background: var(--ring);
 }
 
-/* ---- Scrollbar Styling ---- */
-textarea::-webkit-scrollbar,
-.prose-preview::-webkit-scrollbar {
-  width: 6px;
-}
-
-textarea::-webkit-scrollbar-track,
-.prose-preview::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-textarea::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
-}
-
-textarea::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground);
-}
-
-.prose-preview::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
-}
-
-.prose-preview::-webkit-scrollbar-thumb:hover {
-  background: var(--muted-foreground);
-}
-
-/* ---- Highlight.js theme overrides ---- */
+/* ---- Highlight.js ---- */
 .hljs {
   background: transparent !important;
   color: inherit;
+}
+
+/* ---- Zero-Layout-Shift Auto-Hide Scrollbars ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+*.is-scrolling {
+  scrollbar-color: rgba(128, 128, 128, 0.55) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+*.is-scrolling::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.55);
 }

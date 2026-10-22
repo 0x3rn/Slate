@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import type { AIAction } from "@/app/actions/ai";
+import { HorizontalScrollStrip } from "@/components/horizontal-scroll-strip";
 
 interface AIToolbarProps {
   onAction: (action: AIAction, targetLanguage?: string) => Promise<void>;
@@ -68,7 +69,11 @@ export function AIToolbar({ onAction }: AIToolbarProps) {
   };
 
   return (
-    <div className="flex w-full max-w-full items-center justify-start gap-1 overflow-x-auto whitespace-nowrap rounded-xl border border-border bg-card/95 p-1 shadow-sm backdrop-blur-md md:w-auto md:flex-wrap md:justify-center">
+    <HorizontalScrollStrip
+      className="max-w-full rounded-xl border border-border bg-card/95 p-1 shadow-xs backdrop-blur-md"
+      innerClassName="gap-1 whitespace-nowrap justify-start md:justify-center"
+      scrollStep={220}
+    >
       {actions.map((action) => {
         const isLoading = loadingAction === action.id;
         const Icon = isLoading ? Loader2 : action.icon;
@@ -78,7 +83,7 @@ export function AIToolbar({ onAction }: AIToolbarProps) {
             onClick={() => handleRun(action.id)}
             disabled={loadingAction !== null}
             title={action.label}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
           >
             <Icon className={"h-3.5 w-3.5 " + (isLoading ? "animate-spin" : "")} />
             <span>{action.label}</span>
@@ -86,9 +91,9 @@ export function AIToolbar({ onAction }: AIToolbarProps) {
         );
       })}
 
-      <div className="mx-1 h-4 w-px bg-border" />
+      <div className="mx-1 h-4 w-px shrink-0 bg-border" />
 
-      <div className="inline-flex items-center gap-1">
+      <div className="inline-flex shrink-0 items-center gap-1">
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
@@ -104,7 +109,7 @@ export function AIToolbar({ onAction }: AIToolbarProps) {
         <button
           onClick={() => handleRun("translate", language)}
           disabled={loadingAction !== null}
-          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-muted-foreground transition-all hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
           title="Syntax-Safe Markdown Translate"
         >
           {loadingAction === "translate" ? (
@@ -120,11 +125,11 @@ export function AIToolbar({ onAction }: AIToolbarProps) {
         <span
           role="status"
           aria-live="polite"
-          className="ml-2 rounded bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive"
+          className="ml-2 shrink-0 rounded bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive"
         >
           {errorMsg}
         </span>
       )}
-    </div>
+    </HorizontalScrollStrip>
   );
 }

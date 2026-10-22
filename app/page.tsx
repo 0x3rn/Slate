@@ -1,5 +1,6 @@
 "use client";
 
+import { HorizontalScrollStrip } from "@/components/horizontal-scroll-strip";
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { marked } from "marked";
 import { useTheme } from "next-themes";
@@ -349,7 +350,7 @@ export default function Home() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
       {/* Header */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur-md">
+      <header className="relative flex h-12 shrink-0 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -364,7 +365,7 @@ export default function Home() {
         </div>
 
         {/* Studio Switcher */}
-        <div className="flex items-center rounded-lg bg-muted/60 p-0.5">
+        <div className="flex items-center rounded-lg bg-muted/60 p-0.5 lg:absolute lg:left-1/2 lg:top-1/2 lg:-translate-x-1/2 lg:-translate-y-1/2">
           {(
             [
               { id: "document", label: "Document", icon: FileText },
@@ -528,9 +529,14 @@ export default function Home() {
       {/* Studio 1: Document & Markup Studio */}
       {studio === "document" && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card/50 px-4 py-1.5 backdrop-blur-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center rounded-lg bg-muted/60 p-0.5">
+          <div className="flex shrink-0 flex-col items-center justify-center gap-2 border-b border-border bg-card/40 px-4 py-2 backdrop-blur-sm">
+            {/* Centered Toolbar 1: Mode Switcher + Instant Convert */}
+            <HorizontalScrollStrip
+              className="w-fit max-w-full rounded-xl border border-border bg-card/95 p-1 shadow-xs"
+              innerClassName="gap-2 whitespace-nowrap justify-start sm:justify-center"
+              scrollStep={200}
+            >
+              <div className="flex shrink-0 items-center rounded-lg bg-muted/60 p-0.5">
                 <button
                   onClick={() => {
                     setActiveTab("text-to-markdown");
@@ -558,7 +564,9 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="h-4 w-px shrink-0 bg-border" />
+
+              <div className="flex shrink-0 items-center gap-1.5 pr-1">
                 <Wand2 className="h-3.5 w-3.5 text-muted-foreground" />
                 <select
                   defaultValue=""
@@ -568,10 +576,10 @@ export default function Home() {
                       e.target.value = "";
                     }
                   }}
-                  className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                  className="h-7 w-[168px] rounded-md border border-border bg-background px-2 text-xs text-foreground focus:outline-none"
                 >
                   <option value="" disabled>
-                    Instant Convert / Clean...
+                    Instant Convert / Clean
                   </option>
                   <optgroup label="Export / Inspect Markup (Non-Destructive)">
                     <option value="md-to-html">Markdown &rarr; Standalone HTML</option>
@@ -600,12 +608,17 @@ export default function Home() {
                   </optgroup>
                 </select>
               </div>
-            </div>
+            </HorizontalScrollStrip>
 
-            <div className="flex flex-wrap items-center gap-1.5">
+            {/* Centered Toolbar 2: Export Actions */}
+            <HorizontalScrollStrip
+              className="w-fit max-w-full rounded-xl border border-border bg-card/95 p-1 shadow-xs"
+              innerClassName="gap-1.5 whitespace-nowrap justify-start sm:justify-center"
+              scrollStep={200}
+            >
               <button
                 onClick={handleCopyRichText}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2.5 text-xs font-medium hover:bg-accent"
                 title="Copy formatted Rich Text for Google Docs, Word, Notion, or Gmail"
               >
                 {copiedRichText ? (
@@ -618,7 +631,7 @@ export default function Home() {
 
               <button
                 onClick={() => downloadTextFile(markdown, "document.md", "text/markdown")}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
               >
                 <FileDown className="h-3 w-3" /> .MD
               </button>
@@ -627,7 +640,7 @@ export default function Home() {
                 onClick={() =>
                   downloadBlob(markdownToWordBlob(markdown, "Slate Document"), "document.doc")
                 }
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
               >
                 <FileDown className="h-3 w-3" /> .DOC
               </button>
@@ -640,7 +653,7 @@ export default function Home() {
                     "text/html"
                   )
                 }
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
               >
                 <FileDown className="h-3 w-3" /> .HTML
               </button>
@@ -649,12 +662,15 @@ export default function Home() {
                 onClick={() =>
                   downloadTextFile(markdownToLatex(markdown, "Slate Document"), "document.tex")
                 }
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
               >
                 <FileDown className="h-3 w-3" /> .TEX
               </button>
 
-              <div className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground" title="Controlled Export Dimensions (px)">
+              <div
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground"
+                title="Controlled Export Dimensions (px)"
+              >
                 <span>Size</span>
                 <input
                   type="number"
@@ -663,7 +679,7 @@ export default function Home() {
                   step={50}
                   value={docExportW}
                   onChange={(e) => setDocExportW(Number(e.target.value) || 1240)}
-                  className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
+                  className="w-12 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
                 />
                 <span>&times;</span>
                 <input
@@ -673,19 +689,19 @@ export default function Home() {
                   step={50}
                   value={docExportH}
                   onChange={(e) => setDocExportH(Number(e.target.value) || 1754)}
-                  className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
+                  className="w-12 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
                 />
               </div>
 
               <button
                 onClick={handleDocPngExport}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
+                className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium hover:bg-accent"
                 title="Download Controlled-Size .PNG"
               >
                 <FileDown className="h-3 w-3" /> .PNG
               </button>
 
-              <div className="flex items-center rounded-md border border-border bg-background">
+              <div className="flex shrink-0 items-center rounded-md border border-border bg-background">
                 <select
                   value={pdfTheme}
                   onChange={(e) => setPdfTheme(e.target.value as DocumentExportTheme)}
@@ -705,7 +721,7 @@ export default function Home() {
                   <FileDown className="h-3 w-3" /> .PDF
                 </button>
               </div>
-            </div>
+            </HorizontalScrollStrip>
           </div>
 
           <div className="flex shrink-0 items-center justify-center border-b border-border bg-card/30 px-4 py-1.5 backdrop-blur-sm">

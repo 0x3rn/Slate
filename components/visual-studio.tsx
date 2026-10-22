@@ -1439,10 +1439,10 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   key={item.id}
                   onClick={() => applyLayoutMode(item.id)}
                   className={
-                    "relative h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border transition-all " +
+                    "relative h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border-2 transition-all " +
                     (mmLayout === item.id
-                      ? "border-primary ring-1 ring-primary"
-                      : "border-border opacity-80 hover:opacity-100")
+                      ? "border-primary shadow-xs"
+                      : "border-border/60 opacity-80 hover:opacity-100")
                   }
                 >
                   <svg
@@ -1467,10 +1467,10 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                   key={t.id}
                   onClick={() => applyMmThemePreset(t.id)}
                   className={
-                    "relative h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border transition-all " +
+                    "relative h-[54px] w-[96px] shrink-0 overflow-hidden rounded-md border-2 transition-all " +
                     (mmThemeId === t.id
-                      ? "border-primary ring-1 ring-primary"
-                      : "border-border opacity-80 hover:opacity-100")
+                      ? "border-primary shadow-xs"
+                      : "border-border/60 opacity-80 hover:opacity-100")
                   }
                 >
                   <svg viewBox="0 0 160 90" preserveAspectRatio="none" className="h-full w-full">
@@ -1834,10 +1834,10 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                         });
                       }}
                       className={
-                        "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border transition-all " +
+                        "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border-2 transition-all " +
                         (mmBgConfig.presetId === id
-                          ? "border-primary ring-1 ring-primary"
-                          : "border-border opacity-80 hover:opacity-100")
+                          ? "border-primary shadow-xs"
+                          : "border-border/60 opacity-80 hover:opacity-100")
                       }
                     >
                       <svg
@@ -2153,10 +2153,10 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                     selectSlideElement(s.elements[0]?.id || null);
                   }}
                   className={
-                    "cursor-pointer rounded-lg border p-1.5 transition-all " +
+                    "cursor-pointer rounded-lg border-2 p-1.5 transition-all " +
                     (idx === currentSlideIdx
-                      ? "border-primary bg-primary/5 ring-1 ring-primary"
-                      : "border-border bg-background/50 hover:bg-accent/40")
+                      ? "border-primary bg-primary/5 shadow-xs"
+                      : "border-border/60 bg-background/50 hover:bg-accent/40")
                   }
                 >
                   <div className="mb-1 flex justify-between text-[10px] text-muted-foreground">
@@ -2437,10 +2437,10 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
                         );
                       }}
                       className={
-                        "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border transition-all " +
+                        "relative h-[50px] w-[92px] shrink-0 overflow-hidden rounded-md border-2 transition-all " +
                         (activeSlideBgCfg.presetId === id
-                          ? "border-primary ring-1 ring-primary"
-                          : "border-border opacity-80 hover:opacity-100")
+                          ? "border-primary shadow-xs"
+                          : "border-border/60 opacity-80 hover:opacity-100")
                       }
                     >
                       <svg

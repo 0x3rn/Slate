@@ -48,7 +48,7 @@ export function HorizontalScrollStrip({
   };
 
   return (
-    <div className={"relative flex items-center overflow-hidden " + className}>
+    <div className={"tap-row relative flex items-center overflow-hidden " + className}>
       {canScrollLeft && (
         <div className="pointer-events-none absolute inset-y-0 left-0 z-20 flex items-center bg-gradient-to-r from-background via-background/80 to-transparent pr-3 pl-0.5">
           <button

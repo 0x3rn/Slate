@@ -302,3 +302,21 @@ body {
 *.is-scrolling::-webkit-scrollbar-thumb {
   background: rgba(128, 128, 128, 0.55);
 }
+
+/* ---- Touch & phone ergonomics (responsive-layout spec) ---- */
+/* Inputs under 16px make iOS Safari zoom the page on focus (touch only, any orientation). */
+@media (pointer: coarse) {
+  input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Toolbars marked .tap-row get 44px touch targets on touch screens only;
+   mouse users keep the compact desktop density. */
+@media (pointer: coarse) {
+  .tap-row :is(button, select, label):not([aria-label^="Scroll"]) {
+    min-height: 44px;
+  }
+}

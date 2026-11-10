@@ -152,7 +152,7 @@ export function DataStudio({ onSendToEditor }: DataStudioProps) {
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-background">
       {/* Studio Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card/60 px-4 py-2.5">
+      <div className="tap-row flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card/60 px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground">
             <Table2 className="h-4 w-4 text-blue-500" />

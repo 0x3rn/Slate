@@ -7,6 +7,8 @@ import { useTheme } from "next-themes";
 import { AIToolbar } from "@/components/ai-toolbar";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { RichTextEditor } from "@/components/rich-text-editor";
+import { NumericField } from "@/components/numeric-field";
+import { MobileActionsMenu } from "@/components/mobile-actions-menu";
 import { DataStudio } from "@/components/data-studio";
 import { ImageStudio } from "@/components/image-studio";
 import { VisualStudio } from "@/components/visual-studio";
@@ -348,18 +350,18 @@ export default function Home() {
   if (!mounted) return null;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-background">
+    <div className="flex h-dvh flex-col overflow-hidden bg-background">
       {/* Header */}
-      <header className="relative flex h-12 shrink-0 items-center justify-between border-b border-border bg-card/80 px-4 backdrop-blur-md">
+      <header className="relative flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border bg-card/80 px-4 backdrop-blur-md md:h-12">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/slate-logo.svg" alt="Slate" className="h-5 w-5 dark:invert" />
-            <span className="text-[13px] font-semibold tracking-tight text-foreground">
+            <span className="text-[13px] font-semibold tracking-tight text-foreground max-[359px]:sr-only">
               Slate
             </span>
           </div>
-          <span className="hidden sm:inline-block rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+          <span className="hidden whitespace-nowrap rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary lg:inline-block">
             Full Conversion Suite
           </span>
         </div>
@@ -379,8 +381,11 @@ export default function Home() {
               <button
                 key={item.id}
                 onClick={() => setStudio(item.id)}
+                aria-label={item.label}
+                aria-current={studio === item.id ? "page" : undefined}
+                title={item.label}
                 className={
-                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all " +
+                  "inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-medium transition-all md:min-h-0 md:min-w-0 " +
                   (studio === item.id
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground")
@@ -393,8 +398,16 @@ export default function Home() {
           })}
         </div>
 
-        {/* Right Actions */}
-        <div className="flex items-center gap-1.5">
+        {/* Right Actions: phones get one overflow menu so every target stays 44px */}
+        <div className="md:hidden">
+          <MobileActionsMenu
+            canUndo={history.length > 0}
+            onUndo={handleUndo}
+            onReset={handleReset}
+            onDownloadBundle={handleDownloadProjectBundleZip}
+          />
+        </div>
+        <div className="hidden items-center gap-1.5 md:flex">
           {history.length > 0 && (
             <button
               onClick={handleUndo}
@@ -411,6 +424,7 @@ export default function Home() {
               onClick={() => setPreviewCollapsed(!previewCollapsed)}
               className="hidden md:inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground"
               title={previewCollapsed ? "Show preview" : "Hide preview"}
+              aria-label={previewCollapsed ? "Show preview" : "Hide preview"}
             >
               {previewCollapsed ? (
                 <PanelLeftOpen className="h-4 w-4" />
@@ -424,6 +438,7 @@ export default function Home() {
             onClick={handleReset}
             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             title="Reset Editor"
+            aria-label="Reset editor"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -432,6 +447,7 @@ export default function Home() {
             onClick={handleDownloadProjectBundleZip}
             className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             title="Download Complete Project Bundle (.zip)"
+            aria-label="Download project bundle (.zip)"
           >
             <FolderArchive className="h-3.5 w-3.5" />
             <span className="hidden lg:inline">Bundle (.zip)</span>
@@ -443,13 +459,13 @@ export default function Home() {
 
       {/* Non-Destructive Converted Code Drawer/Modal */}
       {convertedView && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-xs">
-          <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <span className="text-sm font-semibold text-foreground">
+        <div role="dialog" aria-modal="true" aria-label={convertedView.title} className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/60 backdrop-blur-xs sm:items-center sm:p-4">
+          <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden border-border bg-card shadow-2xl sm:h-auto sm:max-h-[85vh] sm:rounded-2xl sm:border">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+              <span className="min-w-0 text-sm font-semibold text-foreground">
                 {convertedView.title}
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => navigator.clipboard.writeText(convertedView.code)}
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-xs font-medium hover:bg-accent"
@@ -479,7 +495,8 @@ export default function Home() {
                 </button>
                 <button
                   onClick={() => setConvertedView(null)}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground"
+                  aria-label="Close"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground sm:h-8 sm:w-8"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -488,7 +505,7 @@ export default function Home() {
             <textarea
               readOnly
               value={convertedView.code}
-              className="min-h-[380px] flex-1 resize-none bg-muted/20 p-4 font-mono text-xs leading-relaxed text-foreground focus:outline-none"
+              className="min-h-0 flex-1 resize-none bg-muted/20 p-4 font-mono text-xs leading-relaxed text-foreground focus:outline-none sm:min-h-[380px]"
               spellCheck={false}
             />
           </div>
@@ -672,23 +689,23 @@ export default function Home() {
                 title="Controlled Export Dimensions (px)"
               >
                 <span>Size</span>
-                <input
-                  type="number"
+                <NumericField
+                  aria-label="Export width in pixels"
                   min={300}
                   max={8000}
                   step={50}
                   value={docExportW}
-                  onChange={(e) => setDocExportW(Number(e.target.value) || 1240)}
+                  onCommit={setDocExportW}
                   className="w-12 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
                 />
                 <span>&times;</span>
-                <input
-                  type="number"
+                <NumericField
+                  aria-label="Export height in pixels"
                   min={300}
                   max={8000}
                   step={50}
                   value={docExportH}
-                  onChange={(e) => setDocExportH(Number(e.target.value) || 1754)}
+                  onCommit={setDocExportH}
                   className="w-12 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
                 />
               </div>
@@ -843,12 +860,12 @@ export default function Home() {
             )}
           </div>
 
-          <div className="flex h-12 shrink-0 items-center justify-center border-t border-border bg-card/80 md:hidden">
+          <div className="flex shrink-0 items-center justify-center border-t border-border bg-card/80 px-4 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] md:hidden">
             <div className="flex rounded-lg bg-muted/60 p-1">
               <button
                 onClick={() => setMobileActivePane("editor")}
                 className={
-                  "rounded-md px-5 py-1 text-xs font-medium " +
+                  "min-h-11 rounded-md px-6 text-sm font-medium " +
                   (mobileActivePane === "editor"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground")
@@ -859,7 +876,7 @@ export default function Home() {
               <button
                 onClick={() => setMobileActivePane("preview")}
                 className={
-                  "rounded-md px-5 py-1 text-xs font-medium " +
+                  "min-h-11 rounded-md px-6 text-sm font-medium " +
                   (mobileActivePane === "preview"
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground")

@@ -1,5 +1,6 @@
 "use client";
 
+import { NumericField } from "@/components/numeric-field";
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { HorizontalScrollStrip } from "@/components/horizontal-scroll-strip";
 import {
@@ -173,15 +174,12 @@ function NumberStepper({
       >
         &minus;
       </button>
-      <input
-        type="number"
+      <NumericField
         min={min}
         max={max}
         step={step}
         value={value}
-        onChange={(e) =>
-          onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))
-        }
+        onCommit={onChange}
         className="h-full w-full bg-transparent px-1 text-center font-mono text-xs text-foreground focus:outline-none"
       />
       <button
@@ -1228,7 +1226,7 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden bg-background text-foreground select-none">
       {/* Minimal Slate Studio Sub-Header */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card/60 px-4 py-2 backdrop-blur-sm">
+      <div className="tap-row flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card/60 px-4 py-2 backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center rounded-lg bg-muted/70 p-0.5">
             <button
@@ -1275,23 +1273,25 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground">
               <span>Size</span>
-              <input
-                type="number"
+              <NumericField
+                aria-label="Mind map width in pixels"
+                liveCommit={false}
                 value={mmDocW}
                 min={300}
                 max={8000}
                 step={50}
-                onChange={(e) => handleResizeMmProject(Number(e.target.value), mmDocH)}
+                onCommit={(next) => handleResizeMmProject(next, mmDocH)}
                 className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
               />
               <span>&times;</span>
-              <input
-                type="number"
+              <NumericField
+                aria-label="Mind map height in pixels"
+                liveCommit={false}
                 value={mmDocH}
                 min={300}
                 max={8000}
                 step={50}
-                onChange={(e) => handleResizeMmProject(mmDocW, Number(e.target.value))}
+                onCommit={(next) => handleResizeMmProject(mmDocW, next)}
                 className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
               />
             </div>
@@ -1344,27 +1344,25 @@ export function VisualStudio({ markdown, darkMode }: VisualStudioProps) {
           <div className="flex flex-wrap items-center gap-1.5">
             <div className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground">
               <span>Size</span>
-              <input
-                type="number"
+              <NumericField
+                aria-label="Slide width in pixels"
+                liveCommit={false}
                 value={slideDocW}
                 min={300}
                 max={8000}
                 step={50}
-                onChange={(e) =>
-                  handleResizeSlideProject(Number(e.target.value), slideDocH)
-                }
+                onCommit={(next) => handleResizeSlideProject(next, slideDocH)}
                 className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
               />
               <span>&times;</span>
-              <input
-                type="number"
+              <NumericField
+                aria-label="Slide height in pixels"
+                liveCommit={false}
                 value={slideDocH}
                 min={300}
                 max={8000}
                 step={50}
-                onChange={(e) =>
-                  handleResizeSlideProject(slideDocW, Number(e.target.value))
-                }
+                onCommit={(next) => handleResizeSlideProject(slideDocW, next)}
                 className="w-14 bg-transparent text-center font-mono text-xs text-foreground focus:outline-none"
               />
             </div>

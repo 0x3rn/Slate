@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
@@ -22,6 +22,13 @@ export const metadata: Metadata = {
       { url: "/favicon.ico?v=3", sizes: "32x32" },
     ],
   },
+};
+
+// viewportFit "cover" lets env(safe-area-inset-*) pad the bottom bar on notched phones.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

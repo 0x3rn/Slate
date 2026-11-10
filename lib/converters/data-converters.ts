@@ -55,8 +55,13 @@ export function parseMarkdownTable(markdown: string): TableData {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n").map((l) => l.trim()).filter((l) => l.includes("|"));
   if (lines.length === 0) return parseDelimitedText(markdown, ",");
 
+  // Split on unescaped pipes only, so "\|" (what tableToMarkdown writes) stays inside its cell.
   const splitRow = (line: string): string[] =>
-    line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+    line
+      .replace(/^\|/, "")
+      .replace(/(?<!\\)\|$/, "")
+      .split(/(?<!\\)\|/)
+      .map((c) => c.trim().replace(/\\\|/g, "|"));
 
   const headers = splitRow(lines[0]);
   const colCount = Math.max(headers.length, 1);
@@ -65,7 +70,7 @@ export function parseMarkdownTable(markdown: string): TableData {
 
   if (lines.length > 1) {
     const sec = splitRow(lines[1]);
-    if (sec.every((c) => /^:?-{2,}:?$/.test(c))) {
+    if (sec.every((c) => /^:?-+:?$/.test(c))) {
       start = 2;
       alignments = Array.from({ length: colCount }, (_, i) => {
         const c = sec[i] || "---";
@@ -82,24 +87,31 @@ export function parseMarkdownTable(markdown: string): TableData {
   return { headers, rows, alignments };
 }
 
+// Nested objects/arrays become JSON text instead of "[object Object]".
+function jsonCellToString(v: unknown): string {
+  if (v === undefined || v === null) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
+
 export function parseJsonToTable(jsonText: string): TableData {
   const parsed: unknown = JSON.parse(jsonText);
   if (Array.isArray(parsed)) {
     if (parsed.length === 0) return { headers: ["Column 1"], rows: [], alignments: ["left"] };
     if (Array.isArray(parsed[0])) {
-      return normalizeRowsToTable(parsed.map((r) => (Array.isArray(r) ? r.map(String) : [String(r)])));
+      return normalizeRowsToTable(parsed.map((r) => (Array.isArray(r) ? r.map(jsonCellToString) : [jsonCellToString(r)])));
     }
     const keys = Array.from(new Set(parsed.flatMap((item) => (item && typeof item === "object" ? Object.keys(item as Record<string, unknown>) : []))));
     const headers = keys.length ? keys : ["Value"];
     const rows = parsed.map((item) => {
       const obj = (item ?? {}) as Record<string, unknown>;
-      return headers.map((h) => (obj[h] === undefined || obj[h] === null ? "" : String(obj[h])));
+      return headers.map((h) => jsonCellToString(obj[h]));
     });
     return { headers, rows, alignments: headers.map(() => "left") };
   }
   if (parsed && typeof parsed === "object") {
     const entries = Object.entries(parsed as Record<string, unknown>);
-    return { headers: ["Key", "Value"], rows: entries.map(([k, v]) => [k, String(v ?? "")]), alignments: ["left", "left"] };
+    return { headers: ["Key", "Value"], rows: entries.map(([k, v]) => [k, jsonCellToString(v)]), alignments: ["left", "left"] };
   }
   throw new Error("Invalid JSON structure for table.");
 }
